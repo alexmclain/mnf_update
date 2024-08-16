@@ -1,6 +1,9 @@
 
 
-wd <- "C:/Users/mclaina/OneDrive - University of South Carolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/"
+
+library(this.path)
+wd <- dirname(this.path::here())
+print(wd)
 setwd(wd)
 
 
@@ -149,7 +152,7 @@ nrow(cc_surv_data)
 # what percentage of surveys have complete data.
 nrow(cc_surv_data)/nrow(surv_data)
 
-## Look at some plots of the data
+## Visualizing relationship between log(SE) and log(n) (should be roughly linear)
 par(mar = c(4,5,1,1))
 plot(
   log(cc_surv_data$N),
@@ -157,14 +160,11 @@ plot(
   pch=19,
   xlab = expression(log(n[ij])),
   ylab = expression(log(S[ij])),
-  cex.lab=1.4,col=as.integer(cc_surv_data$Source)
+  cex.lab=1.4
   )
-legend("topright",
-       legend = unique(cc_surv_data$Source),
-       col = unique(as.integer(cc_surv_data$Source)),
-       pch=19)
 
-## (for modeling only, these SE's will be put back in the data later)
+## Identifying outlying SE's and removing for modeling only. 
+## The outlying SE's will be included in the final data.
 removed <- cc_surv_data %>% filter(Point.Estimate == 0)
 pred_rm <- NULL
 resid_rm <- NULL
@@ -191,27 +191,26 @@ while (L>0){
 }
 
 ## SE's removed from outlier procedure.
-#View(removed)
+removed
 
-# Now we create the SE variable to use for modeling and set "removed" SE's to NA
+# Now we create the SE variable to use for modeling, which sets "removed" SE's to NA
 surv_data$SE <- surv_data$Standard.Error
 surv_data$SE[surv_data$N %in% removed$N & surv_data$Point.Estimate %in% removed$Point.Estimate] <- NA
 
-length(surv_data$PointEstimate[!is.na(surv_data$PointEstimate)])
+
 
 
 
 
 #### 4. Predicting with standard errors ####
 ##### Recode the reference level and rename some variables.
-surv_data <-  within(surv_data, Source <- relevel(Source, ref = "SMART"))
 surv_data <- surv_data %>% 
   rename(country = Country, year = Year)
 
 ##### Predicting for those with P1mP and N.
-fitted_model <- lme(log(SE) ~ log(P1mP) + log(N),random=~1|country,weights = varIdent(form=~1|Source),data = surv_data,na.action = na.omit)
+fitted_model <- lme(log(SE) ~ log(P1mP) + log(N),random=~1|country,data = surv_data,na.action = na.omit)
 
-miss_ind <- complete.cases(surv_data %>% select(c(Source, P1mP, N, country, Source)))
+miss_ind <- complete.cases(surv_data %>% select(c(P1mP, N, country)))
 pred <- pred2 <- rep(NA, length(miss_ind))
 pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
 pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
@@ -223,12 +222,11 @@ surv_data = surv_data %>% bind_cols(Pred_SE = exp(pred))
 ##### Predicting for those with P1mP, and no N but a weighted N
 fitted_model <- lme(log(SE)~ log(P1mP) + log(weighted_N) + log(P1mP),
                     random=~1|country,
-                    weights = varIdent(form=~1|Source),
                     data = surv_data,
                     na.action = na.omit)
 
 ## predict for countries with other surveys in the data, then for those without.
-miss_ind <- complete.cases(surv_data %>% select(c(Source, P1mP,weighted_N, country, Source)))
+miss_ind <- complete.cases(surv_data %>% select(c(P1mP,weighted_N, country)))
 pred <- rep(NA, length(miss_ind))
 pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
 pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
@@ -240,12 +238,11 @@ surv_data = surv_data %>% bind_cols(Pred_SE_noN = exp(pred))
 ##### Predicting for those with no N
 fitted_model <- lme(log(SE)~ log(P1mP) + log(P1mP),
                     random=~1|country,
-                    weights = varIdent(form=~1|Source),
                     data = surv_data,
                     na.action = na.omit)
 
 ## predict for countries with other surveys in the data, then for those without.
-miss_ind <- complete.cases(surv_data %>% select(c(Source, P1mP, country, Source)))
+miss_ind <- complete.cases(surv_data %>% select(c(P1mP, country)))
 pred <- rep(NA, length(miss_ind))
 pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
 pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
@@ -255,10 +252,10 @@ surv_data = surv_data %>% bind_cols(Pred_SE_zeroN = exp(pred))
 
 
 ##### Predicting for those with no log(P1mP) but with an N
-fitted_model <- lme(log(SE)~  log(N) + log(N),random=~1|country,weights = varIdent(form=~1|Source),data = surv_data,na.action = na.omit)
+fitted_model <- lme(log(SE)~  log(N) + log(N),random=~1|country,data = surv_data,na.action = na.omit)
 
 ## predict for countries with other surveys in the data, then for those without.
-miss_ind <- complete.cases(surv_data %>% select(c(Source, N, country, Source)))
+miss_ind <- complete.cases(surv_data %>% select(c(N, country)))
 pred <- rep(NA, length(miss_ind))
 pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
 pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
@@ -283,12 +280,8 @@ plot(
   pch=19,
   xlab = expression(log(n[ij])),
   ylab = expression(log(S[ij])),
-  cex.lab=1.4,col=as.integer(surv_data$Source)
+  cex.lab=1.4
 )
-legend("topright",
-       legend = unique(surv_data$Source),
-       col = unique(as.integer(surv_data$Source)),
-       pch=19)
 
 #### Final data
 final_data <- surv_data %>% 
@@ -298,7 +291,7 @@ final_data <- surv_data %>%
     ) 
 
 
-#View(final_data)
+View(final_data)
 
 ### Export data ###
 

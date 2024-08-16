@@ -1,5 +1,8 @@
 
-wd <- "C:/Users/mclaina/OneDrive - University of South Carolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/"
+
+library(this.path)
+wd <- dirname(this.path::here())
+print(wd)
 setwd(wd)
 
 library(tidyverse)

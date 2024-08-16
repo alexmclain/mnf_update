@@ -12,11 +12,10 @@ sex coverage.
 
 1.  **SE_clean_and_impute.R**: Impute missing standard error (SE)
     information.
-2.  **Age_range_analysis.R**: Perform a cross-walk to account for
-    partial age ranges.
+2.  **Age_range_analysis.R**: Integration of data sources that were originally collected using different (non-standard) age ranges.
 3.  **Merging Survey_Covariate_Data.R**: Merge survey data with
     covariate data.
-4.  **Sex_cross_walk.R**: Cross-walk for partial sex coverage.
+4.  **Sex_cross_walk.R**: Generates approximate sex-specific prevalence rates for specific years and countries, solely for use in visual figures.
 
 ## Data Sources
 
@@ -60,7 +59,7 @@ Each file should be run once for “Stunting” and once for “Overweight”.
 An essential component of the statistical methods applied to generate
 the country prevalence estimates is the incorporation of the sample
 standard error (SSE) of the survey to adjust for the survey uncertainty.
-However, SSE’s were not reported for all surveys. Some surveys reported
+However, SSE’s were not reported for all data sources. Some data sources reported
 95% confidence intervals (CI), but not the SSE. The CIs can be used to
 estimate the SSE. The scale of CI calculation varies by study and is not
 always known. To identify the scale of calculation, we try various
@@ -69,13 +68,11 @@ and 95% CI limits, to identify which transformation resulted in the most
 symmetric 95% CI. Once the transformation was identified, the SSE can be
 estimated.
 
-For surveys without SSE’s or 95% CI’s, they were predicted using a
+For data sources without SSE’s or 95% CI’s, they were predicted using a
 linear mixed model on the log transformed SSE values. The SSE model was
-fitted using the surveys that had complete data on SSE, survey type,
+fitted using the data sources that had complete data on SSE,
 prevalence and sample size. The fitted model was then used to estimate
-the SSE for surveys that were missing SSE. To limit the impact studies
-with missing SSE on the analysis, a conservative prediction of SSE was
-used where one standard error was added to the predicted SSE values.
+the SSE for data sources that were missing SSE. 
 
 ##### Script Sections
 
@@ -92,26 +89,26 @@ This script imputes missing SSE information. The sections include:
 
 #### Background
 
-Some surveys do not cover the entire age interval 0 to 59 months and
+Some data sources do not cover the entire age interval 0 to 59 months and
 thus are not aligned with the standard definition for the child
 malnutrition indicators (e.g., 0-5 or 0-12 months not covered). To
-incorporate these surveys, this script runs a linear mixed model on the
+incorporate these data sources, this script runs a linear mixed model on the
 difference between the 0-59-month prevalence estimate and the estimates
 at 0-5-, 6-11-, 12-23-, 24-35-, 36-47- and 48-59-month age-groups, using
-data from surveys with both the 0-59-month prevalence and separate
+data from sources with both the 0-59-month prevalence and separate
 age-group prevalence values. Specifically, this difference was modeled
 as a function of the full prevalence, age-group and a full prevalence by
-age-group interaction. Model diagnostics showed that the linearity
-assumption was upheld. With the estimated mixed model, the data for
-missing age groups were then imputed using the data from the observed
-age groups. The prevalence estimate for the full age range was then
-aggregated using the estimated and observed age-group prevalence rates,
-for sources with at least one missing age group.
+age-group interaction. Model diagnostics showed that these covariates 
+significantly aid in the prediction of the outcomes. With the estimated 
+mixed model, the data for missing age groups were then imputed using the 
+data from the observed age groups. The prevalence estimate for the full 
+age range was then aggregated using the estimated and observed age-group 
+prevalence rates, for sources with at least one missing age group.
 
 ##### Script Sections
 
-This script performs a cross-walk to account for partial age ranges. The
-sections include:
+This script imputes missing age groups to integrate data sources that have 
+partial age ranges. Specifically, the sections include:
 
 1.  Loading and formatting the data (lines 12 - 195)
 2.  Running linear mixed models to predict missing age groups (lines
@@ -129,9 +126,23 @@ Africa, Western Africa, the Middle East and North Africa, East Asia and
 Pacific, South Asia, Europe and Central Asia, High-Income Western
 Countries, and Latin America and the Caribbean.
 
+
 ### Sex_cross_walk.R
 
-This script addresses partial sex coverage. The sections include:
+This script predicts missing sex-specific prevalence rates. It's important to 
+note that these predicted rates are not used in the main modeling process and do 
+not influence the final prevalence estimates. Their sole purpose is to provide 
+approximate sex-specific prevalence rates for certain years and countries, which 
+are then used in figures to visually represent these rates.
+
+These predicted values can be particularly useful when creating figures that 
+display sex-specific rates. For instance, when examining a figure that shows the 
+estimated stunting rate for females, a seemingly unexplained decrease in the 
+trend might occur. This could be due to a survey that only reported overall 
+prevalence without breaking it down by sex. By including the predicted female 
+prevalence from this step in the figure, we help prevent such misunderstandings.
+
+The sections include:
 
 1.  Loading and formatting the data (lines 20 - 131)
 2.  Running linear mixed models to predict missing sex groups (lines

@@ -1,4 +1,4 @@
-
+wd <- "/Users/mclainfamily/Library/CloudStorage/OneDrive-UniversityofSouthCarolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/Github/mnf_update"
 
 library(tidyverse)
 

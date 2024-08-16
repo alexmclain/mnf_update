@@ -418,53 +418,72 @@ pred_fun <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE){
     if(!is.null(attr(t1,"class"))) {D <- blockMatrixDiagonal(u_var,Dpr1,Dpr2)}
     if(is.null(attr(t1,"class"))) {D <- blockMatrixDiagonal(u_var,u2_var,Dpr1,Dpr2)}
     
-    t1 <- try(R_inv <- solve(R),silent = TRUE)
+    t1 <- try(R_inv <- Matrix::solve(R),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
-    }
-    t1 <- try(D_inv <- solve(D),silent = TRUE)
-    if(!is.null(attr(t1,"class"))){
-      if(any(diag(D)<(10e-13))){cat("Warning: Some variance components are zero (with machine precision), setting them to a non-zero small value to increase computational stability. See lme output for to see which variance components are essentially zero and consider revising model. \n")}
-      diag(u_var)[diag(u_var)<(10e-13)] <- 10e-13
-      diag(b_var)[diag(b_var)<(10e-13)] <- 10e-13
-      diag(l_var)[diag(l_var)<(10e-13)] <- 10e-13 
-      Dpr1 <- do.call(blockMatrixDiagonal,replicate(N, b_var, simplify=FALSE))
-      Dpr2 <- do.call(blockMatrixDiagonal,replicate(N, l_var, simplify=FALSE))
-      t1 <- try(u2_var<- as.matrix(fitted_model$modelStruct$reStruct$ind2)*sigma2,silent=TRUE)
-      if(!is.null(attr(t1,"class"))) {D <- blockMatrixDiagonal(u_var,Dpr1,Dpr2)}
-      if(is.null(attr(t1,"class"))) {
-        diag(u2_var)[diag(u2_var)<(10e-13)] <- 10e-13
-        D <- blockMatrixDiagonal(u_var,u2_var,Dpr1,Dpr2)
-      }
-      t1 <- try(D_inv <- solve(D),silent = TRUE)
+      t1 <- try(R_inv <- solve(R),silent = TRUE)
       if(!is.null(attr(t1,"class"))){
         cat("Error: Inverse failed. Consider revising model.\n")
         break
+      }
+    }
+    t1 <- try(D_inv <- Matrix::solve(D),silent = TRUE)
+    
+    if(!is.null(attr(t1,"class"))){
+      t1 <- try(D_inv <- solve(D),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        if(any(diag(D)<(10e-13))){cat("Warning: Some variance components are zero (with machine precision), setting them to a non-zero small value to increase computational stability. See lme output for to see which variance components are essentially zero and consider revising model. \n")}
+        diag(u_var)[diag(u_var)<(10e-13)] <- 10e-13
+        diag(b_var)[diag(b_var)<(10e-13)] <- 10e-13
+        diag(l_var)[diag(l_var)<(10e-13)] <- 10e-13 
+        Dpr1 <- do.call(blockMatrixDiagonal,replicate(N, b_var, simplify=FALSE))
+        Dpr2 <- do.call(blockMatrixDiagonal,replicate(N, l_var, simplify=FALSE))
+        t1 <- try(u2_var<- as.matrix(fitted_model$modelStruct$reStruct$ind2)*sigma2,silent=TRUE)
+        if(!is.null(attr(t1,"class"))) {D <- blockMatrixDiagonal(u_var,Dpr1,Dpr2)}
+        if(is.null(attr(t1,"class"))) {
+          diag(u2_var)[diag(u2_var)<(10e-13)] <- 10e-13
+          D <- blockMatrixDiagonal(u_var,u2_var,Dpr1,Dpr2)
+        }
+        t1 <- try(D_inv <- Matrix::solve(D),silent = TRUE)
+        if(!is.null(attr(t1,"class"))){
+          t1 <- try(D_inv <- solve(D),silent = TRUE)
+          if(!is.null(attr(t1,"class"))){
+            cat("Error: Inverse failed. Consider revising model.\n")
+            break
+          }
+        }
       }
     }
     
     G <- t(C)%*%R_inv%*%C
     B <- blockMatrixDiagonal(0*diag(dim(X)[2]),D_inv)
     
-    t1 <- try(S <- solve(G + B),silent = TRUE)
+    t1 <- try(S <- Matrix::solve(G + B),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      stop("S found to be singular.\n")
+      t1 <- try(S <- solve(G + B),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        stop("S found to be singular.\n")
+      }
     }
     df <- sum(diag(S%*%G))
     
     Sigma <- Z%*%D%*%t(Z) + R
-    t1 <- try(Sigma_inv <- solve(Sigma),silent = TRUE)
+    t1 <- try(Sigma_inv <- Matrix::solve(Sigma),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
+      t1 <- try(Sigma_inv <- solve(Sigma),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        cat("Error: Inverse failed. Consider revising model.\n")
+        break
+      }
     }
     if(!is.null(attr(t1,"class"))){stop("Inverse of covariance matrix failed.")}
     
-    t1 <- try(beta_hat <- solve(t(X)%*%Sigma_inv%*%X)%*%t(X)%*%Sigma_inv%*%Y,silent = TRUE)
+    t1 <- try(beta_hat <- Matrix::solve(t(X)%*%Sigma_inv%*%X)%*%t(X)%*%Sigma_inv%*%Y,silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
+      t1 <- try(beta_hat <- solve(t(X)%*%Sigma_inv%*%X)%*%t(X)%*%Sigma_inv%*%Y,silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        cat("Error: Inverse failed. Consider revising model.\n")
+        break
+      }
     }
     full_b <- c(beta_hat,D%*%t(Z)%*%Sigma_inv%*%(Y - X%*%beta_hat))
   }
@@ -896,21 +915,16 @@ pred_fun_noPcov <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRU
     Dpr2 <- do.call(blockMatrixDiagonal,replicate(N, l_var, simplify=FALSE))
     D <- blockMatrixDiagonal(u_var,Dpr1,Dpr2)
     
-    t1 <- try(R_inv <- solve(R),silent = TRUE)
+    t1 <- try(R_inv <- Matrix::solve(R),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
+      t1 <- try(R_inv <- solve(R),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        cat("Error: Inverse failed. Consider revising model.\n")
+        break
+      }
     }
-    t1 <- try(D_inv <- solve(D),silent = TRUE)
+    t1 <- try(D_inv <- Matrix::solve(D),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
-    }
-    
-    if(!is.null(attr(t1,"class"))){
-      diag(u_var)[diag(u_var)<(10e-13)] <- 10e-13
-      D <- blockMatrixDiagonal(u_var,Dpr1,Dpr2)
-      
       t1 <- try(D_inv <- solve(D),silent = TRUE)
       if(!is.null(attr(t1,"class"))){
         cat("Error: Inverse failed. Consider revising model.\n")
@@ -918,29 +932,52 @@ pred_fun_noPcov <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRU
       }
     }
     
+    if(!is.null(attr(t1,"class"))){
+      diag(u_var)[diag(u_var)<(10e-13)] <- 10e-13
+      D <- blockMatrixDiagonal(u_var,Dpr1,Dpr2)
+      
+      t1 <- try(D_inv <- Matrix::solve(D),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        t1 <- try(D_inv <- solve(D),silent = TRUE)
+        if(!is.null(attr(t1,"class"))){
+          cat("Error: Inverse failed. Consider revising model.\n")
+          break
+        }
+      }
+    }
+    
     G <- t(C)%*%R_inv%*%C
     B <- blockMatrixDiagonal(0*diag(dim(X)[2]),D_inv)
     
-    t1 <- try(S <- solve(G + B),silent = TRUE)
+    t1 <- try(S <- Matrix::solve(G + B),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      stop("S found to be singular.\n")
+      t1 <- try(S <- solve(G + B),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        stop("S found to be singular.\n")
+      }
     }
     df <- sum(diag(S%*%G))
     
     
     
     Sigma <- Z%*%D%*%t(Z) + R
-    t1 <- try(Sigma_inv <- solve(Sigma),silent = TRUE)
+    t1 <- try(Sigma_inv <- Matrix::solve(Sigma),silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
+      t1 <- try(Sigma_inv <- solve(Sigma),silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        cat("Error: Inverse failed. Consider revising model.\n")
+        break
+      }
     }
     if(!is.null(attr(t1,"class"))){stop("Inverse of covariance matrix failed.")}
     
-    t1 <- try(beta_hat <- solve(t(X)%*%Sigma_inv%*%X)%*%t(X)%*%Sigma_inv%*%Y,silent = TRUE)
+    t1 <- try(beta_hat <- Matrix::solve(t(X)%*%Sigma_inv%*%X)%*%t(X)%*%Sigma_inv%*%Y,silent = TRUE)
     if(!is.null(attr(t1,"class"))){
-      cat("Error: Inverse failed. Consider revising model.\n")
-      break
+      t1 <- try(beta_hat <- solve(t(X)%*%Sigma_inv%*%X)%*%t(X)%*%Sigma_inv%*%Y,silent = TRUE)
+      if(!is.null(attr(t1,"class"))){
+        cat("Error: Inverse failed. Consider revising model.\n")
+        break
+      }
     }
     full_b <- c(beta_hat,D%*%t(Z)%*%Sigma_inv%*%(Y - X%*%beta_hat))
     
@@ -2132,50 +2169,50 @@ output_function <- function(plot_data, Estimation, data_one, marker, date,path){
     ungroup() %>% 
     select(-Sex) 
   
-  wide_data <- both_data %>% 
-    left_join(male_data) %>% 
-    left_join(female_data) %>% 
-    mutate(diff = Prediction_overall - 
-             (Prediction_male + Prediction_female)/2) %>% 
-    select(country:year, diff)
+  # wide_data <- both_data %>% 
+  #   left_join(male_data) %>% 
+  #   left_join(female_data) %>% 
+  #   mutate(diff = Prediction_overall - 
+  #            (Prediction_male + Prediction_female)/2) %>% 
+  #   select(country:year, diff)
   
   PP_plot_data <- PP_plot_data %>% 
-    left_join(wide_data) %>% 
-    mutate(
-      diff = case_when(
-        Sex ==  "Both" ~ 0,
-        TRUE ~ diff
-      )
-    ) %>% 
+    # left_join(wide_data) %>% 
+    # mutate(
+    #   diff = case_when(
+    #     Sex ==  "Both" ~ 0,
+    #     TRUE ~ diff
+    #   )
+    # ) %>% 
     mutate(
       Sex = case_when(
         Sex ==  "Both" ~ "Overall",
         TRUE ~ Sex
       )
-    ) %>% 
-    mutate(
-      Point.Estimate = Point.Estimate + diff,
-      Prediction = Prediction + diff,
-      pred_fixed = pred_fixed + diff,
-      pred_fixpen = pred_fixpen + diff,
-      lower_CI = lower_CI + diff,
-      upper_CI = upper_CI + diff,
-      lower_PI = lower_PI + diff,
-      upper_PI = upper_PI + diff
-    ) %>% 
-    mutate(
-      resid = (Point.Estimate - Prediction)/SE_pred
-    ) %>% 
-    select(-c("diff","Point.Estimate","SMART","Surveillance"))
-  
-  min_test <- PP_plot_data %>% select(Prediction,
-                                      pred_fixed,
-                                      pred_fixpen,
-                                      lower_CI,
-                                      upper_CI,
-                                      lower_PI,
-                                      upper_PI)
-  if(min(min_test,na.rm = TRUE) < 0){stop("Minimum test failed")}
+    ) %>%
+    # mutate(
+    #   Point.Estimate = Point.Estimate + diff,
+    #   Prediction = Prediction + diff,
+    #   pred_fixed = pred_fixed + diff,
+    #   pred_fixpen = pred_fixpen + diff,
+    #   lower_CI = lower_CI + diff,
+    #   upper_CI = upper_CI + diff,
+    #   lower_PI = lower_PI + diff,
+    #   upper_PI = upper_PI + diff
+    # ) %>% 
+    # mutate(
+    #   resid = (Point.Estimate - Prediction)/SE_pred
+    # ) %>% 
+    select(-c("Point.Estimate","SMART","Surveillance"))
+  # 
+  # min_test <- PP_plot_data %>% select(Prediction,
+  #                                     pred_fixed,
+  #                                     pred_fixpen,
+  #                                     lower_CI,
+  #                                     upper_CI,
+  #                                     lower_PI,
+  #                                     upper_PI)
+  # if(min(min_test,na.rm = TRUE) < 0){stop("Minimum test failed")}
   
   write.csv(PP_plot_data,paste0(path,marker," results ",date,".csv",sep=""),row.names = FALSE)
   

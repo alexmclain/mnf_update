@@ -20,12 +20,9 @@ The following data sources are used and can be found in the
 
 - **GBD 2022 MCI and SDI.csv**: MCI and SDI covariate information from
   IHME.
-- **API_NY.GDP.MKTP.CD_DS2_en_csv_v2_4701247.csv**: Economic and
-  health-related covariate data used for imputation.
-- **WPP2022_Demographic_Indicators_Medium.csv**: Additional demographic
-  indicators.
-- **Tidy_World_Devel_Indic.rds**: Tidy data set of world development
-  indicators.
+- **API_NY.GDP.MKTP.CD_DS2_en_csv_v2_4701247.csv**: Gross Domestic Product by country and year (obtained from https://data.worldbank.org/indicator/NY.GDP.MKTP.CD). 
+- **WPP2022_Demographic_Indicators_Medium.csv**: Additional demographic indicators (obtained from https://population.un.org/wpp/Download/Archive/CSV/).
+- **Tidy_World_Devel_Indic.rds**: Used as an intermediate merging dataset. Not a data source.
 
 ## Imputation Process
 
@@ -49,11 +46,11 @@ structured as follows:
       data. The data is then back transformed, providing the imputed
       values up to 2022.
 
-4.  **Perform Imputation for 2023 for All Countries** (lines 172 - 352):
+4.  **Perform Imputation for 2023-2025 for All Countries** (lines 172 - 352):
 
-    - Since there are no observations for 2023, a semi-parametric
+    - Since there are no observations after 2022, a semi-parametric
       longitudinal model is used to estimate the trend for each imputed
-      dataset. The 2023 values are then randomly sampled from the
+      dataset. The 2023-2025 values are then randomly sampled from the
       estimated predictive distribution of the outcome (SDI or MCI) for
       each imputed dataset.
 

@@ -24,7 +24,7 @@ contains the **“4 - Results”** folder.
   `year` and `month` values used in the data cleaning process.
 - **marker_f**: Needed to find the analysis data. This should match what
   was used in the `Analysis_MI.R` script.
-- **date**: Used for appending the file names.
+- **date**: Used for appending the file names, e.g., `"May2024"`.
 
 ## Details
 

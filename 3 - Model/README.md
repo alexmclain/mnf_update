@@ -4,10 +4,13 @@
 The statistical model used in these analyses is similar to that proposed
 in McLain et al. (2019) and discussed in more detail therein. The
 general model is a penalized longitudinal mixed-model with a
-heterogeneous error term. Non-linear longitudinal patterns in the
-outcomes are captured using penalized cubic B-splines, with
-country-specific intercepts and random cubic B-splines. The connection
-between penalized spline smoothing and linear mixed-effects models
+heterogeneous error term. The model uses economic data, along with country, 
+regional, and global trends to predict the outcomes for countries and years 
+with no data sources. Specifically, the outputs of the model are used to 
+predict country level trends in stunting and overweight. Non-linear 
+longitudinal patterns in the outcomes are captured using penalized cubic 
+B-splines, with country-specific intercepts and random cubic B-splines. The 
+connection between penalized spline smoothing and linear mixed-effects models
 (Currie and Durban 2002) allows the model to penalize the likelihood to
 estimate the B-spline coefficients.
 
@@ -75,7 +78,8 @@ entry-spacing="0">
 
 Currie, Iain D, and Maria Durban. 2002. “Flexible Smoothing with
 p-Splines: A Unified Approach.” *Statistical Modelling* 2 (4): 333–49.
-https://doi.org/<https://doi.org/10.1191/1471082x02st039ob>.
+<a href="https://doi.org/10.1191/1471082x02st039ob">doi.org/10.1191/1471082x02st039ob</a>.
+
 
 </div>
 
@@ -85,7 +89,8 @@ McLain, Alexander C, Edward A Frongillo, Juan Feng, and Elaine Borghi.
 2019. “Prediction Intervals for Penalized Longitudinal Models with
 Multisource Summary Measures: An Application to Childhood Malnutrition.”
 *Statistics in Medicine* 38 (6): 1002–12.
-https://doi.org/<https://doi.org/10.1002/sim.8024>.
+<a href="https://doi.org/10.1002/sim.8024">doi.org/10.1002/sim.8024</a>
+
 
 </div>
 

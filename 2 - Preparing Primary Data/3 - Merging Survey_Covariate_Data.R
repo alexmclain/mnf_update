@@ -1,5 +1,8 @@
 
-wd <- "C:/Users/mclaina/OneDrive - University of South Carolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/"
+
+library(this.path)
+wd <- dirname(this.path::here())
+print(wd)
 setwd(wd)
 
 library(tidyverse)
@@ -25,10 +28,9 @@ for(multiple_imputation in multiple_imputation_vec){
   if(multiple_imputation){
     cov_data <- readRDS("Data/IHME_covs/Multiple_Imputed_Mar2023.rds")
   }else{
-    cov_data <- readRDS("Data/IHME_covs/Mean_Imputed_IHME_Mar2023.rds") %>% 
+    cov_data <- readRDS("Data/IHME_covs/Single_Impute_Mar2023.rds") %>% 
       mutate(.imp = 0)
   }
-  
   
   #### Keeping only distinct rows ####
   cov_data_dis <- cov_data %>% 

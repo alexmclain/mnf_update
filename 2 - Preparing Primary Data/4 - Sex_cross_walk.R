@@ -1,7 +1,9 @@
 
-wd <- "C:/Users/mclaina/OneDrive - University of South Carolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/"
-setwd(wd)
 
+library(this.path)
+wd <- dirname(this.path::here())
+print(wd)
+setwd(wd)
 
 source("Utils/Programs_Cleaning_SE.R")
 library(readxl)

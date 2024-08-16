@@ -1,10 +1,11 @@
 remove(list=ls())
 
-# wd <- "C:/Users/mclaina/OneDrive - University of South Carolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/"
-wd <- "/Users/mclainfamily/Library/CloudStorage/OneDrive-UniversityofSouthCarolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning"
+library(tidyverse)
+library(this.path)
+wd <- dirname(this.path::here())
+print(wd)
 setwd(wd)
 
-library(tidyverse)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
