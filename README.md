@@ -17,8 +17,8 @@ methods used to estimate confidence and prediction intervals, please
 refer to:
 
 - McLain et al. (2019)
-- An application of the methods published in Saraswati et al. (2022).
-- Corresponding editorial by Finaret (2022).
+- An application of the methods published in Saraswati et al. (2022), and
+a corresponding editorial by Finaret (2022).
 
 ## Folder Structure
 
@@ -32,9 +32,11 @@ covariate data.
 This folder includes programs to:
 
 - Impute missing standard error (SE) information.
-- Perform a cross-walk to account for partial age ranges.
+- Integration of data sources that were originally collected using different 
+(non-standard) age ranges.
 - Merge survey data with covariate data.
-- Cross-walk for partial sex coverage.
+- Generates approximate sex-specific prevalence rates for specific years 
+and countries (solely for use in visual figures).
 
 ### 3. Model
 
@@ -43,8 +45,11 @@ of the data for stunting or overweight.
 
 ### 4. Results
 
-In this folder, you will find code for: - Pooling imputed estimates. -
-Plotting results. - Comparing estimates with past data.
+In this folder, you will find code for: 
+
+- Pooling imputed estimates. 
+- Plotting results. 
+- Comparing estimates with past data.
 
 ### Additional Folders
 
@@ -85,7 +90,7 @@ For questions or issues, please contact the repository maintainer.
 
 Finaret, Amelia B. 2022. “Advancing Nutritional Epidemiology by Linking
 Datasets and Addressing Data Quality.” *The Journal of Nutrition* 152
-(7): 1595–96. https://doi.org/<https://doi.org/10.1093/jn/nxac092>.
+(7): 1595–96. <a href="https://doi.org/10.1093/jn/nxac092">doi.org/10.1093/jn/nxac092</a>
 
 </div>
 
@@ -94,8 +99,7 @@ Datasets and Addressing Data Quality.” *The Journal of Nutrition* 152
 McLain, Alexander C, Edward A Frongillo, Juan Feng, and Elaine Borghi.
 2019. “Prediction Intervals for Penalized Longitudinal Models with
 Multisource Summary Measures: An Application to Childhood Malnutrition.”
-*Statistics in Medicine* 38 (6): 1002–12.
-https://doi.org/<https://doi.org/10.1002/sim.8024>.
+*Statistics in Medicine* 38 (6): 1002–12. <a href="https://doi.org/10.1002/sim.8024">doi.org/10.1002/sim.8024</a>
 
 </div>
 
@@ -105,8 +109,7 @@ Saraswati, Chitra M, Elaine Borghi, João JR da Silva Breda, Monica C
 Flores-Urrutia, Julianne Williams, Chika Hayashi, Edward A Frongillo,
 and Alexander C McLain. 2022. “Estimating Childhood Stunting and
 Overweight Trends in the European Region from Sparse Longitudinal Data.”
-*The Journal of Nutrition* 152 (7): 1773–82.
-https://doi.org/<https://doi.org/10.1093/jn/nxac072>.
+*The Journal of Nutrition* 152 (7): 1773–82. <a href="https://doi.org/10.1093/jn/nxac072">doi.org/10.1093/jn/nxac072</a>
 
 </div>
 

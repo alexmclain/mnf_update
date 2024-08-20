@@ -12,10 +12,12 @@ sex coverage.
 
 1.  **SE_clean_and_impute.R**: Impute missing standard error (SE)
     information.
-2.  **Age_range_analysis.R**: Integration of data sources that were originally collected using different (non-standard) age ranges.
+2.  **Age_range_analysis.R**: Integration of data sources that were originally 
+collected using different (non-standard) age ranges.
 3.  **Merging Survey_Covariate_Data.R**: Merge survey data with
     covariate data.
-4.  **Sex_cross_walk.R**: Generates approximate sex-specific prevalence rates for specific years and countries, solely for use in visual figures.
+4.  **Sex_cross_walk.R**: Generates approximate sex-specific prevalence rates 
+for specific years and countries, solely for use in visual figures.
 
 ## Data Sources
 
