@@ -211,10 +211,14 @@ surv_data <- surv_data %>%
 fitted_model <- lme(log(SE) ~ log(P1mP) + log(N),random=~1|country,data = surv_data,na.action = na.omit)
 
 miss_ind <- complete.cases(surv_data %>% select(c(P1mP, N, country)))
-pred <- pred2 <- rep(NA, length(miss_ind))
-pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
-pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
-pred[is.na(pred)] = pred2[is.na(pred)]
+pred <- rep(NA, length(miss_ind))
+full_pred <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
+pred[miss_ind] <- full_pred
+full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
+# Add one standard deviation of the random intercept dispersion for predictions 
+# with no other values from their country
+re_sd <- as.numeric(VarCorr(fitted_model))[4]
+pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 pred[surv_data$P1mP==0] <- NA
 surv_data = surv_data %>% bind_cols(Pred_SE = exp(pred))
 
@@ -228,9 +232,13 @@ fitted_model <- lme(log(SE)~ log(P1mP) + log(weighted_N) + log(P1mP),
 ## predict for countries with other surveys in the data, then for those without.
 miss_ind <- complete.cases(surv_data %>% select(c(P1mP,weighted_N, country)))
 pred <- rep(NA, length(miss_ind))
-pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
-pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
-pred[is.na(pred)] = pred2[is.na(pred)]
+full_pred <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
+pred[miss_ind] <- full_pred
+full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
+# Add one standard deviation of the random intercept dispersion for predictions 
+# with no other values from their country
+re_sd <- as.numeric(VarCorr(fitted_model))[4]
+pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 pred[surv_data$P1mP==0] <- NA
 surv_data = surv_data %>% bind_cols(Pred_SE_noN = exp(pred))
 
@@ -244,9 +252,13 @@ fitted_model <- lme(log(SE)~ log(P1mP) + log(P1mP),
 ## predict for countries with other surveys in the data, then for those without.
 miss_ind <- complete.cases(surv_data %>% select(c(P1mP, country)))
 pred <- rep(NA, length(miss_ind))
-pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
-pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
-pred[is.na(pred)] = pred2[is.na(pred)]
+full_pred <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
+pred[miss_ind] <- full_pred
+full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
+# Add one standard deviation of the random intercept dispersion for predictions 
+# with no other values from their country
+re_sd <- as.numeric(VarCorr(fitted_model))[4]
+pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 pred[surv_data$P1mP==0] <- NA
 surv_data = surv_data %>% bind_cols(Pred_SE_zeroN = exp(pred))
 
@@ -257,9 +269,13 @@ fitted_model <- lme(log(SE)~  log(N) + log(N),random=~1|country,data = surv_data
 ## predict for countries with other surveys in the data, then for those without.
 miss_ind <- complete.cases(surv_data %>% select(c(N, country)))
 pred <- rep(NA, length(miss_ind))
-pred[miss_ind] <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
-pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
-pred[is.na(pred)] = pred2[is.na(pred)]
+full_pred <- predict(fitted_model, newdata = surv_data, na.action = na.omit)
+pred[miss_ind] <- full_pred
+full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
+# Add one standard deviation of the random intercept dispersion for predictions 
+# with no other values from their country
+re_sd <- as.numeric(VarCorr(fitted_model))[4]
+pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 surv_data = surv_data %>% bind_cols(Pred_SE_noP1mP = exp(pred))
 
 #### Setting the SE_val to the appropriate predicted value.
