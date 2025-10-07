@@ -9,23 +9,41 @@ setwd(wd)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
-month <- "May" #Month Key
-year <- "2024" #Year Key
-date <- "MultiImp_noSMARTcorr_May24" #for appending filename
 
+month <- "Jul" #Month Key to name file
+year <- "2025" #Year Key to name file
 
-if(grepl("St",marker)){
-  measure = "Stunting"
-}else{
-  measure = "Overweight"
+month_o <- "Jul" #Month Key to find data
+year_o <- "2025"#Year Key to find data
+marker_f <- paste0("")
+
+# marker_f <- paste0(marker," Global_2_sp")
+date <- paste(marker_f,month,year)
+
+name <- paste("")#
+
+measure = marker
+if(grepl("Sev",marker)){
+  measure = "Severe Overweight"
 }
 
-path_data = paste0("Data/Analysis files/",measure,"/")
-path_fig = paste0("Figures/",measure,"/",month,year,"/")
+path_data = paste0("Data/Analysis files/",marker,"/")
+path_fig = paste0("Figures/",marker,"/",month,year,"/")
 
-all_data <- readRDS(paste0("Data/Merged/",year,"/",marker,"_",
-                           month,"_final_multiple_impute.rds")) %>% 
+all_data <- readRDS(paste0("Data/Merged/",year_o,"/",marker,"_",
+                           month_o,"_final_multiple_impute.rds")) %>% 
   filter(.imp == 1 | .imp == 0) %>% 
+  ### Getting rid of a Morocco survey for severe overweight that appears to be incorrect.
+  # mutate(
+  #   Point.Estimate.NS = case_when(
+  #     UNICEFSurveyID == 8918 ~ NA_real_,
+  #     TRUE ~ Point.Estimate.NS
+  #   ), 
+  #   Point.Estimate.Imp = case_when(
+  #     UNICEFSurveyID == 8918 ~ NA_real_,
+  #     TRUE ~ Point.Estimate.Imp
+  #   )
+  # ) %>% 
   mutate(
     Sex = case_when(
       Sex == "Overall" ~ 0,
@@ -74,7 +92,8 @@ for(j in Sex_m){
       Type = factor(Type, levels = c("Survey","Outlier"))
       )
   
-  date_j <- paste0(j,"_",date)
+  date_j <- paste(j)
+  if(!(name == "")){date_j <- paste(j,name)}
   
   ################## ONLY INCLUDING COUNTRIES WITH DATA #####################
   
@@ -85,7 +104,7 @@ for(j in Sex_m){
   
   ############################### FIXED SCALES ###############################
   
-  pdf(paste(path_fig,marker," estimates ",date_j,"unadj.pdf",sep = ""),width = 15, height = 8)
+  pdf(paste(path_fig,marker," estimates ",date_j,".pdf",sep = ""),width = 15, height = 8)
   for(k in reg_vals){
     reg_nice <- reg_vals[k==reg_vals]
     t_country <- unique(P_plot_data$country[P_plot_data$Region==k])
@@ -102,7 +121,7 @@ for(j in Sex_m){
       facet_wrap(~country,scales="fixed") +  
       ylim(0,Lim_U) + 
       labs(x="Year", y=paste(measure,"Proportion"), 
-           title = paste(marker,"estimates for",reg_nice),size=60) + 
+           title = paste(measure,"estimates for",reg_nice),size=60) + 
       theme_bw() + 
       theme(axis.text=element_text(family = "Helvetica", color="#666666",size=10), 
             axis.title = element_text(family = "Helvetica", color="#666666", face="bold", size=22)) 
@@ -137,7 +156,8 @@ for(j in Sex_m){
     p <- ggplot(data=plot_data, aes(x=year,y=(pred))) + 
       ylim(0,Lim_U) + geom_line() + facet_wrap(~country,scales="fixed") 
     
-    p <- p + labs(x="Year", y=paste(measure,"Proportion"),title = paste(marker,"estimates for",reg_nice),size=60) + 
+    p <- p + labs(x="Year", y=paste(measure,"Proportion"),
+                  title = paste(measure,"estimates for",reg_nice),size=60) + 
       theme_bw() + 
       theme(axis.text = element_text(family = "Helvetica", color="#666666",size=10), 
             axis.title = element_text(family = "Helvetica", color="#666666", face="bold", size=22)) 
@@ -176,7 +196,7 @@ for(j in Sex_m){
       ylim(0,Lim_U) + geom_line() + facet_wrap(~country,scales="fixed")
     
     p <- p +  labs(x="Year", y=paste(measure,"Proportion"), 
-                   title = paste(marker,"estimates for",reg_nice),size=60) + 
+                   title = paste(measure,"estimates for",reg_nice),size=60) + 
       theme_bw() + 
       theme(axis.text=element_text(family = "Helvetica", color="#666666",size=10), 
             axis.title = element_text(family = "Helvetica", color="#666666", face="bold", size=22)) 
@@ -215,7 +235,7 @@ for(j in Sex_m){
       ylim(0,Lim_U) + geom_line() + facet_wrap(~country,scales="fixed")
     
     p <- p +  labs(x="Year", y=paste(measure,"Proportion"),
-                   title = paste(marker,"estimates for",reg_nice),size=60) + 
+                   title = paste(measure,"estimates for",reg_nice),size=60) + 
       theme_bw() + 
       theme(axis.text=element_text(family = "Helvetica", color="#666666",size=10), 
             axis.title = element_text(family = "Helvetica", color="#666666", face="bold", size=22)) 
@@ -243,7 +263,7 @@ for(j in Sex_m){
   Countries_w_data <- unique(P_plot_data$country[P_plot_data$country %in% unique(P_plot_data$country[!is.na(P_plot_data$Y)])])
   Lim_U <- max(P_plot_data$upper_CI2)
   
-  pdf(paste0(path_fig,marker," comparison by Sex NS_",date,".pdf"),width = 15, height = 8)
+  pdf(paste0(path_fig,marker," comparison by Sex NS_",name,".pdf"),width = 15, height = 8)
   
   for(k in reg_vals){
     reg_nice <- reg_vals[k==reg_vals]
@@ -261,7 +281,7 @@ for(j in Sex_m){
       ylim(0,Lim_U) + 
       facet_wrap(~country,scales="fixed")
     p <- p +  labs(x="Year", y=paste(measure,"Proportion"), 
-                   title = paste(marker,"estimates for",reg_nice),size=60) + 
+                   title = paste(measure,"estimates for",reg_nice),size=60) + 
       theme_bw() + 
       theme(axis.text = element_text(family = "Helvetica", color="#666666",size=10), 
             axis.title = element_text(family = "Helvetica", color="#666666", face="bold", size=22)) 

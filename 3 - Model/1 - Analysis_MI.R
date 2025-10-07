@@ -8,13 +8,12 @@ source("Utils/Programs_Feb_2020.R")
 library(tidyverse)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-year <- "2024"
-month <- "May" #for finding the data
-marker_f <- paste0(marker,"_noSMARTcorr")
+year <- "2025"
+month <- "Jul" #for finding the data
+marker_f <- paste0(marker,"")
 
 #### 1. Setting Model Parameters #### 
 if(grepl("St",marker)){
-  measure = "Stunting"
   model_formula <- ~Sex + Region + MCI_5_yr+ I(MCI_5_yr^2) + SDI + 
     MCI_5_yr:Sex+ I(MCI_5_yr^2):Sex + Region:Sex
   
@@ -25,9 +24,9 @@ if(grepl("St",marker)){
   ##    every group has a row.
   Pcov_data <- NULL
   
-  ##Number of penalized and random splines.  Equally spaced throughout the B.knots.
+  ##Penalized and random splines. 
   DF_P <- seq(1993,2023,1)
-
+  
   #Specifying the covariance matrix of the random effects.  
   #   - cov_mat="CS" (default) -> compound symmetric covariance matrix
   #   - cov_mat="UN"  -> unstructured symmetric covariance matrix
@@ -36,10 +35,10 @@ if(grepl("St",marker)){
   slope <- TRUE
   
 }else{
-  measure = "Overweight"
   model_formula <- ~ Sex + P_Region + MCI_5_yr
   
-  ##Number of penalized and random splines.  Equally spaced throughout the B.knots.
+  ##Penalized and random splines. 
+  # DF_P <- 2005
   DF_P <- seq(1993,2022,5)
   
   #Specifying the covariance matrix of the random effects.  
@@ -50,7 +49,7 @@ if(grepl("St",marker)){
   slope <- TRUE
 }
 ## Path to output folder
-path = paste0("Data/Analysis files/",measure,"/")
+path = paste0("Data/Analysis files/",marker,"/")
 
 TRANS <- FALSE
 q.order <- 2
@@ -62,8 +61,8 @@ for(j in 1:B){
   
   all_data <- readRDS(paste0("Data/Merged/",year,"/",marker,"_",
                              month,"_final_multiple_impute.rds"))  %>% 
-    filter(.imp == j | .imp == 0)  %>% 
-    mutate(
+    filter(.imp == j | .imp == 0) %>% 
+      mutate(
       Sex = case_when(
         Sex == "Both" ~ 0,
         Sex == "Female" ~ 1,
@@ -86,12 +85,13 @@ for(j in 1:B){
            "SE_var" = "SE_val") %>% 
     arrange(country, year) #%>% filter(!is.na(Y))
   
+  
   cat(j,length(unique(all_data$country)), 
       length(c(all_data$Y)),
       length(c(all_data$Y[!is.na(all_data$Y)])), 
       table(all_data$Region),"\n") 
   
-  if(measure == "Overweight"){
+  if(grepl("Overweight",marker)){
     all_data$P_Region <- all_data$Region
     levels(all_data$P_Region)
     referent_lev <- 2
@@ -110,7 +110,7 @@ for(j in 1:B){
       Y = log(Y/(1-Y))
     )
   
-  if(measure == "Stunting"){
+  if(marker == "Stunting"){
     DF_R <- quantile(data_w_out$year,probs = c(0.5))
     B.knots <- c(min(data_w_out$year[!is.na(data_w_out$Y)])-1, 
                  max(data_w_out$year[!is.na(data_w_out$Y)])+2)

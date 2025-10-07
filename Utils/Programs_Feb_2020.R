@@ -683,7 +683,7 @@ model_fit_noPcov <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_d
   # The "id" for the PT-splines
   ind <- rep(1,length(country))
   
-  ctrl <- lmeControl(opt = c("optim"),maxIter = 1000, msMaxIter = 1000, niterEM = 500,  msMaxEval = 2000,tolerance = 1e-6)
+  ctrl <- lmeControl(opt = c("nlminb"),maxIter = 1000, msMaxIter = 1000, niterEM = 500,  msMaxEval = 2000,tolerance = 1e-6)
   ## Fit the model
   if(length(cov_data)==1){
     if(!symm & !diag){fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=pdIdent(~0+Zi.matrix),country=pdSymm(~1),country2=pdCompSymm(~0+rand_spline))),weights = varSum(form=~(SE_var^2)),control = ctrl)}
@@ -1150,7 +1150,7 @@ model_fit_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_da
   Sigmai.inv <- diag(1/sqrt(eigen.vec))  	  				    # diagonal matrix of eigenvalues
   Zi.matrix <- B.matrix%*%Ui.matrix%*%Sigmai.inv        # instead of Z=BU
   Xi.matrix <- cbind(1,year)
-  rand_spline <- as.matrix(bs(year,knots=DF_R,Boundary.knots = B.knots,intercept = F) )
+  rand_spline <- as.matrix(bs(year, knots=DF_R, Boundary.knots = B.knots, intercept = F) )
   rand_spline <- as.matrix(rand_spline)
   
   # The "id" for the PT-splines
@@ -1209,12 +1209,12 @@ model_fit_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_da
   
   ## Fit the model
   if(length(cov_data)==1){
-    if(!symm & diag){fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=test1,country=pdDiag(~1),country2=pdDiag(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
+    if(!symm & diag){ fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=test1,country=pdDiag(~1),country2=pdDiag(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
     if(symm){         fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=test1,country=pdDiag(~1),country2=pdSymm(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
-    if(!symm & !diag){ fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=test1,country=pdDiag(~1),country2=pdCompSymm(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
+    if(!symm & !diag){fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=test1,country=pdDiag(~1),country2=pdCompSymm(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
   }
   if(length(cov_data)>1){
-    if(!symm & diag){fitted_model <- lme(Y ~ 0+Xi.matrix+COV,random=(list(ind=test1,country=pdDiag(~1),country2=pdDiag(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
+    if(!symm & diag){ fitted_model <- lme(Y ~ 0+Xi.matrix+COV,random=(list(ind=test1,country=pdDiag(~1),country2=pdDiag(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
     if(symm){         fitted_model <- lme(Y ~ 0+Xi.matrix+COV,random=(list(ind=test1,country=pdDiag(~1),country2=pdSymm(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)}
     if(!symm & !diag){fitted_model <- lme(Y ~ 0+Xi.matrix+COV,random=(list(ind=test1,country=pdDiag(~1),country2=pdCompSymm(~0+rand_spline))) ,weights = varSum(form=~(SE_var^2)),control = ctrl)
     }
@@ -1550,7 +1550,7 @@ model_fit_noPcov_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order
   c_year <- year - median(year)
   all_data$c_year <- all_data$year - median(year)
   
-  ctrl <- lmeControl(opt = c("optim"),maxIter = 1000, msMaxIter = 1000, niterEM = 500,  msMaxEval = 2000,tolerance = 1e-6)
+  ctrl <- lmeControl(opt = c("nlminb"),maxIter = 1000, msMaxIter = 1000, niterEM = 500,  msMaxEval = 2000,tolerance = 1e-6)
   ## Fit the model
   if(length(cov_data)==1){
     if(!symm & !diag){fitted_model <- lme(Y ~ 0+Xi.matrix,random=(list(ind=pdIdent(~0+Zi.matrix),country=pdDiag(~1+c_year),country2=pdCompSymm(~0+rand_spline))),weights = varSum(form=~(SE_var^2)),control = ctrl)}
@@ -1768,7 +1768,12 @@ make_Z_noPcov_slope <- function(all_data,data_frame,DF_P,DF_R,B.knots,q.order){
   Sigmai.inv <- diag(1/sqrt(eigen.vec))  	  				#diagonal matrix of eigenvalues
   all_spline_pred <- B.matrix%*%Ui.matrix%*%Sigmai.inv           		#instead of Z=BU
   rand_spline_pred <- as.matrix(bs(cov_data_used_only$year,knots=DF_R,Boundary.knots = B.knots,intercept = F) )
-  rand_spline_pred <- rand_spline_pred[,-c((length(DF_R)+2):(length(DF_R)+3))]
+  rand_spline_dim <- dim(rand_spline_pred)
+  rand_spline_dim[2] <- rand_spline_dim[2] - ncol(rand_spline_pred[,c((length(DF_R)+2):(length(DF_R)+3))])
+  rand_spline_pred <- matrix(
+    rand_spline_pred[,-c((length(DF_R)+2):(length(DF_R)+3))], 
+    nrow = rand_spline_dim[1],
+    ncol = rand_spline_dim[2])
   
   ## Creating the Z matrix.
   Z_u <-all_spline_pred
@@ -1777,8 +1782,8 @@ make_Z_noPcov_slope <- function(all_data,data_frame,DF_P,DF_R,B.knots,q.order){
   unq_cnt <- unique(new_country)
   count <- 1
   for(k in 1:length(unq_cnt)){
-    mat1 <- matrix(0,dim(rand_spline_pred)[1],2)
-    mat2 <- matrix(0,dim(rand_spline_pred)[1],dim(rand_spline_pred)[2])
+    mat1 <- matrix(0,rand_spline_dim[1],2)
+    mat2 <- matrix(0,rand_spline_dim[1],rand_spline_dim[2])
     ni <- length(new_country[new_country==unq_cnt[k]])
     count2 <- count + ni -1
     mat1[count:count2,] <- cbind(rep(1,ni),cov_data_used_only$c_year[count:count2])

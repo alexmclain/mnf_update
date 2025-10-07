@@ -10,7 +10,7 @@ library(dplyr)
 library(nlme)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-year <- "2024"
+year <- "2025"
 
 stunt_data <- readRDS(paste0("Data/JME/",year,"/Cleaned/",marker,"_SE_clean.rds"))
 
@@ -32,7 +32,7 @@ stunt_data_slim <- stunt_data %>%
          # Creating a fake UNICEF ID when one is missing. 
          UNICEFSurveyID = case_when(
            !is.na(UNICEFSurveyID) ~ UNICEFSurveyID,
-           is.na(UNICEFSurveyID) ~ max_unicefid + as.numeric(WHOSurveyID)
+           is.na(UNICEFSurveyID) ~ max_unicefid + as.numeric(row_number())
          ))
 
 ##### Clean up the notes variable #####

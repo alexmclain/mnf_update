@@ -13,8 +13,8 @@ library(dplyr)
 
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-month = "May" #for appending filename
-year <- "2024"
+month <- "Jul" #for appending filename
+year <- "2025"
 
 ### If doing for multiple imputation set as TRUE, otherwise FALSE
 multiple_imputation_vec <- c(TRUE,FALSE)
@@ -28,7 +28,7 @@ for(multiple_imputation in multiple_imputation_vec){
   }
   
   
-
+  
   ##### Creating a dataset where both is missing when male and female are observed.
   
   surv_data <- surv_data %>% 
@@ -137,7 +137,7 @@ for(multiple_imputation in multiple_imputation_vec){
   ### Predicting for Females
   surv_wide <-  surv_wide_B %>%  
     filter(.imp <= 1) %>% 
-    mutate(Source = relevel(factor(All_africa_HIW), ref = "South Asia")) %>% 
+    mutate(Source = relevel(factor(All_africa_HIW), ref = "Southern Asia")) %>% 
     dplyr::select(-c(".imp"))
   
   surv_wide$SEV_Both[is.na(surv_wide$SEV_Both)] <- mean(surv_wide$SEV_Both[!is.na(surv_wide$SEV_Both)])
@@ -474,13 +474,10 @@ for(multiple_imputation in multiple_imputation_vec){
       Point.Estimate.Imp = Point.Estimate
     ) %>% 
     dplyr::select(
-      c(.imp,ISO.code, country, Region, year, Sex, Point.Estimate.Orig, 
-        Point.Estimate.Imp, Point.Estimate.NS, SE_pred, SE_val, ShortSource,
-        SDI, MCI, MCI_5_yr, WB.Income.Group, SEV, UNICEFSurveyID,
-        WHOSurveyID,	EstimateType,	LowerLimit,	UpperLimit,	weighted_N,	
-        unweighted_N,	StandardFootnotes,	ReportAuthorProvider,	
-        FullSourceTitle,	N,	Standard.Error
-      )
+      .imp,ISO.code, country, Region, year, Sex, Point.Estimate.Orig, 
+      Point.Estimate.Imp, Point.Estimate.NS, SE_pred, SE_val, ShortSource,
+      SDI, MCI, MCI_5_yr, WB.Income.Group, SEV, UNICEFSurveyID,Standard.Error,
+      everything()
     ) %>% 
     arrange(.imp,country,year,Sex)
   

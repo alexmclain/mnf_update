@@ -16,7 +16,7 @@ library(readxl)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 handle <- "JME_Country_Level_Input_"
-year <- "2024"
+year <- "2025"
 
 t1 <- try(surv_data <- read_excel(paste0("Data/JME/",year,"/Raw/",handle,marker,".xls")), 
           silent = TRUE)
@@ -30,6 +30,9 @@ dim(surv_data)
 length(surv_data$PointEstimate[!is.na(surv_data$PointEstimate)])
 
 ## Export excluded estimates with really small N
+if(is.null(surv_data$unweighted_N)){
+  surv_data <- surv_data %>% mutate(unweighted_N = NA_real_)
+  }
 surv_data_sm = surv_data %>% 
   filter(!is.na(unweighted_N) & unweighted_N < 6)
 write_csv(surv_data_sm,paste0("Data/JME/",year,"/Cleaned/",marker,"_smallN.csv"))
@@ -52,6 +55,7 @@ surv_data$Source[surv_data$Source %in% c("CDHS","CFSVA","CWIQ", "EHIS","GFHS","I
 surv_data$Source[surv_data$Source=="DHS-Style"] = "DHS"
 surv_data$Source[surv_data$Source=="MICS-DHS"] = "MICS"
 surv_data$Source[surv_data$Source=="MICS-Style"] = "MICS"
+surv_data$Source[is.na(surv_data$Source)] = "Other"
 surv_data$Source <- factor(surv_data$Source,levels=unique(surv_data$Source),labels=unique(surv_data$Source))
 table(surv_data$Source)
 
@@ -116,8 +120,9 @@ summary(cbind(SE_vec,surv_data$Standard.Error,SE_vec/surv_data$Standard.Error))
 
 # Changing surveys where confidence intervals are available and the SE is not
 # to the estimated SE.
-surv_data$Standard.Error[is.na(surv_data$Standard.Error) & !is.na(surv_data$LowerLimit)] <- 
-  SE_vec[is.na(surv_data$Standard.Error) & !is.na(surv_data$LowerLimit)] 
+  surv_data$Standard.Error[is.na(surv_data$Standard.Error) & !is.na(surv_data$LowerLimit)] <- 
+    SE_vec[is.na(surv_data$Standard.Error) & !is.na(surv_data$LowerLimit)] 
+
 
 # Getting the number of observed SE's and total SE's. 
 length(surv_data$PointEstimate[!is.na(surv_data$PointEstimate)])
@@ -176,7 +181,7 @@ while (L>0){
     log(Standard.Error)~log(P1mP) + log(N),
     data = cc_surv_data_rm,
     random=~1|Country,
-    #control = lmeControl(opt = "optim", maxIter = 1000),
+    control = lmeControl(opt = "optim", maxIter = 1000),
     weights = varIdent(~as.factor(Source))
     )
   resid <- residuals(fit,type = "pearson")
@@ -224,10 +229,16 @@ surv_data = surv_data %>% bind_cols(Pred_SE = exp(pred))
 
 
 ##### Predicting for those with P1mP, and no N but a weighted N
+control = list(opt = "nlminb")
+if(grepl("Overweight",marker)){
+  control = list(opt = "optim")
+}
 fitted_model <- lme(log(SE)~ log(P1mP) + log(weighted_N) + log(P1mP),
                     random=~1|country,
                     data = surv_data,
-                    na.action = na.omit)
+                    na.action = na.omit, 
+                    control = list(opt = "optim")
+                    )
 
 ## predict for countries with other surveys in the data, then for those without.
 miss_ind <- complete.cases(surv_data %>% select(c(P1mP,weighted_N, country)))
@@ -307,7 +318,7 @@ final_data <- surv_data %>%
     ) 
 
 
-View(final_data)
+# View(final_data)
 
 ### Export data ###
 

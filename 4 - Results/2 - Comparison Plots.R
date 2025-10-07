@@ -1,32 +1,43 @@
-wd <- "/Users/mclainfamily/Library/CloudStorage/OneDrive-UniversityofSouthCarolina/Collaboration/Malnutrition/Global Analysis/R_programs/SE Imputation and N Cleaning/Github/mnf_update"
+remove(list=ls())
 
+library(this.path)
 library(tidyverse)
+wd <- dirname(this.path::here())
+print(wd)
+setwd(wd)
 
-marker <- "Overweight"
+marker <- as.character(commandArgs(trailingOnly = TRUE))
+month <- "Jul" #for finding the data
+year <- "2025"
 
-date <- "MultiImp_noSMARTcorr_May24" #for appending filename
-date2 <- "MultiImp_noSMARTcorr_Apr24" #for appending filename
+marker_f <- paste0(marker)
+date <- paste(marker_f,"results ",month,year)
+date2 <- paste(marker_f,"results ","Jul 2025_nlmb")
+# date2 <- paste(marker_f,"results","25February2025")
 
-name <- "May2022"
-name2 <- "April2024"
+name <- "Jul2025"
+name2 <- "Jul2025_1knot"
 
-date_file <- "May2024"
 
-if(grepl("St",marker)){
-  measure = "Stunting"
-}else{
-  measure = "Overweight"
+date_file <- "Jul2025"
+measure <- marker
+if(grepl("Over",marker)){
+  y_high = 0.35
+  if(grepl("Sev",marker)){
+    y_high = 0.25
+  }
 }
+
 path_data = paste0("Data/Analysis files/",measure,"/")
 path_fig = paste0("Figures/",measure,"/",date_file,"/")
 
 
-P_plot_data <- read.csv(paste0(path_data,marker," results ",date,".csv"))
+P_plot_data <- read.csv(paste0(path_data,date,".csv"))
 P_plot_data <- P_plot_data %>% mutate(Y=Point.Estimate.Imp) %>% 
   rename("SE_var"="Total_SSE","pred"="Prediction","lower_CI2"="lower_PI","upper_CI2"="upper_PI")
 
 
-P_plot_data_Mar <- read.csv(paste0(path_data,marker," results ",date2,".csv"))
+P_plot_data_Mar <- read.csv(paste0(path_data,date2,".csv"))
 P_plot_data_Mar <- P_plot_data_Mar %>% mutate(Y=Point.Estimate.Imp) %>% 
   rename("SE_var"="Total_SSE","pred"="Prediction","lower_CI2"="lower_PI","upper_CI2"="upper_PI") 
 
@@ -73,7 +84,7 @@ for(k in reg_vals){
       WHOSurveyID = WHOSurveyID.x,
       Type = new.y
     )
-
+  
   
   plot_data <- plot_data %>% 
     left_join(plot_data_all.x) %>% 
@@ -105,30 +116,37 @@ for(k in reg_vals){
     bind_rows(plot_data_mar) %>% 
     filter(Sex == "Overall") %>% 
     mutate(
-      Type = factor(Type, levels = c(0,1),labels = c("Used Previously","New Data"))
+      Type = factor(Type, levels = c(0,1),labels = c("Used previously","New survey"))
     )
   
-  p <- ggplot(data=all_est,aes(x=year,y=pred,col=Group)) + 
-    geom_line() + 
-    geom_point(aes(x=year,y=Y,col=Type))  + 
-    facet_wrap(~country,scales="fixed")
+  if(grepl("St",marker)){
+    p <- ggplot(data=all_est,aes(x=year,y=pred,col=Group)) + 
+      geom_line() + 
+      geom_point(aes(x=year,y=Y,col=Type))  + 
+      facet_wrap(~country,scales="fixed")
+  }else{
+    p <- ggplot(data=all_est,aes(x=year,y=pred,col=Group)) + 
+      geom_line() + 
+      ylim(0,y_high) +
+      geom_point(aes(x=year,y=Y,col=Type))  + 
+      facet_wrap(~country,scales="fixed")
+  }
   
   p <- p +  labs(
     x="Year", 
     y=paste(measure,"Prevalence"),
-    title = paste(measure,"estimates for", reg_nice, marker, date, "versus", date2), 
+    title = paste(measure,"estimates for", reg_nice, marker, name, "versus", name2), 
     size=60
-    ) + 
+  ) + 
     theme_bw() + 
     theme(
       axis.text = element_text(family = "Helvetica", color="#666666",size=10), 
       axis.title = element_text(family = "Helvetica", color="#666666", face="bold", size=22)
-      ) 
+    ) 
   
   print(p)
   # This will give a Warning message "Removed XXX rows containing...." ignore this.
 }
 
 dev.off()
-
 

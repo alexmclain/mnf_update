@@ -10,22 +10,20 @@ library(tidyverse)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
-month <- "May" #Month Key
-year <- "2024" #Year Key
-date <- "MultiImp_noSMARTcorr_May24" #for appending filename
-marker_f <- paste0(marker,"_noSMARTcorr")
+month <- "Jul" #Month Key to name file
+year <- "2025" #Year Key to name file
 
-## Path to output folder
-if(grepl("St",marker)){
-  measure = "Stunting"
-}else{
-  measure = "Overweight"
-}
+month_o <- "Jul" #Month Key to find data
+year_o <- "2025"#Year Key to find data
+marker_f <- paste0("")
 
-path = paste0("Data/Analysis files/",measure,"/")
+date <- paste(marker_f,month,year) #for appending filename
 
 
-Estimation <- readRDS(paste0(path,"/Mi_files/","Estimation ",marker_f,".rds"))
+path = paste0("Data/Analysis files/",marker,"/")
+
+
+Estimation <- readRDS(paste0(path,"/Mi_files/","Estimation ",marker,"",marker_f,".rds"))
 
 ### Summarizing imputed samples:
 boot_vals <- Estimation$boot_vals
@@ -36,7 +34,7 @@ Var_mean_mat <- NULL
 Var_pred_mat <- NULL
 B <- length(boot_vals)
 for(j in boot_vals){
-  plot_data <- read_rds(paste0(path,"/Mi_files/","/Plot data for ",marker_f," imputation ",j,".rds"))
+  plot_data <- read_rds(paste0(path,"/Mi_files/","/Plot data for ",marker,"",marker_f," imputation ",j,".rds"))
   cat(dim(plot_data),"\n")
   Point.Est_mat <- cbind(Point.Est_mat,plot_data$pred)
   Point.Est_fixed_mat <- cbind(Point.Est_fixed_mat,plot_data$pred_fixed)
@@ -63,8 +61,19 @@ remove(list = c("Point.Est_mat","Point.Est_fixed_mat",
                 "Var_pred_mat"))
 
 
-data_one <- readRDS(paste0("Data/Merged/",year,"/",marker,"_",month,"_final_multiple_impute.rds")) %>% 
+data_one <- readRDS(paste0("Data/Merged/",year_o,"/",marker,"_",month_o,"_final_multiple_impute.rds")) %>% 
   filter(.imp == j | .imp == 0) %>% 
+  ### Getting rid of a Morocco survey for severe overweight that appears to be incorrect.
+  # mutate(
+  #   Point.Estimate.NS = case_when(
+  #     UNICEFSurveyID == 8918 ~ NA_real_,
+  #     TRUE ~ Point.Estimate.NS
+  #   ), 
+  #   Point.Estimate.Imp = case_when(
+  #     UNICEFSurveyID == 8918 ~ NA_real_,
+  #     TRUE ~ Point.Estimate.Imp
+  #   )
+  # ) %>% 
   dplyr::select(-".imp")
 
 ### Outputting the data to "path" folder.

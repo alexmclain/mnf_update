@@ -213,8 +213,10 @@ registerDoParallel(cores = no_cores)
 cl <- makeCluster(no_cores) 
 
 settings_to_try <- 1:B
-foreach(set_i = settings_to_try)  %dopar% {
-  
+foreach(set_i = settings_to_try,
+        .packages = (.packages()))  %dopar% {
+          source("Utils/Programs_Feb_2020.R")
+          
   j <- set_i
   all_data <- P_all_data %>% 
     filter(.imp == j & year > 2013)
@@ -290,8 +292,10 @@ P_all_data <- P_all_data %>%
   ungroup()
 
 settings_to_try <- 1:B
-foreach(set_i = settings_to_try)  %dopar% {
-  
+foreach(set_i = settings_to_try,
+        .packages = (.packages()))  %dopar% {
+          source("Utils/Programs_Feb_2020.R")
+          
   j <- set_i
   all_data <- P_all_data %>% 
     filter(.imp == j & year > 2013)

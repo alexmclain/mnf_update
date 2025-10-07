@@ -6,6 +6,7 @@ print(wd)
 setwd(wd)
 
 library(tidyverse)
+library(readxl)
 simpleCap <- function(x) {
   s <- strsplit(x, " ")[[1]]
   paste(toupper(substring(s, 1, 1)), substring(s, 2),
@@ -14,8 +15,8 @@ simpleCap <- function(x) {
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
-month <- "May" #for appending filename
-year <- "2024"
+month <- "Jul" #for appending filename
+year <- "2025"
 
 #### Note: "Imputation of IHME covariate data_multiple_impute.R" or
 #### "Imputation of IHME covariate data_single_impute.R" must 
@@ -62,6 +63,8 @@ for(multiple_imputation in multiple_imputation_vec){
     dplyr::select(-c(Age_range,Adj_PointEstimate)) %>% 
     filter(year > 1989)
   
+  if(!any(names(stunt_res) == "M49")){stunt_res$M49 <- NA}
+  
   ### Get the total number of primary data sources before merging.
   length(stunt_res$Point.Estimate[!is.na(stunt_res$Point.Estimate)])
   
@@ -101,24 +104,21 @@ for(multiple_imputation in multiple_imputation_vec){
   
   
   ### Load in and edit regional groupings ###
-  reg_groups <- read.csv("Data/Country/Region_groupings.csv")
-  reg_groups <- reg_groups %>% dplyr::select(-c(country,Country))
-  HIC_list <- read.csv("Data/Country/HIC_list_Nov_2020.csv")
-  HIC_list <- HIC_list %>% dplyr::select(-c(country)) %>% rename(ISO.code = ISO)
-  reg_groups_HIC <- left_join(reg_groups,HIC_list)
-  reg_groups_HIC$All_africa_HIW <- as.character(reg_groups_HIC$All_africa_HIW)
-  unique(reg_groups_HIC$All_africa_HIW[is.na(reg_groups_HIC$X2019)])
-  reg_groups_HIC$All_africa_HIW[!is.na(reg_groups_HIC$X2019)] <- "High-income Countries"
-  reg_groups <- reg_groups_HIC %>% select(c(ISO.code,All_africa_HIW))
+  reg_groups <- read_xlsx("Data/Country/Crosswalk_Jan_2025.xlsx") %>% 
+    select(-"CountryorArea") %>% 
+    rename(
+      ISO.code = MNF_Country_Code,
+      All_africa_HIW = Modelling_Group
+      )
   
   ### Merge regional groupings with data ###
   Stunt_data_w_cov <- merge(Stunt_data_w_cov,reg_groups,by="ISO.code",all = TRUE)
   data_miss <- Stunt_data_w_cov[is.na(Stunt_data_w_cov$All_africa_HIW),]
   Stunt_data_w_cov$All_africa_HIW <- apply(as.matrix(tolower(as.character(Stunt_data_w_cov$All_africa_HIW))),1,simpleCap)
   Stunt_data_w_cov$country <- as.character(Stunt_data_w_cov$Country)
-  ### Create "East and Central Africa" region
-  Stunt_data_w_cov$All_africa_HIW[Stunt_data_w_cov$All_africa_HIW=="East Africa"] <- "East and Central Africa"
-  Stunt_data_w_cov$All_africa_HIW[Stunt_data_w_cov$All_africa_HIW=="Central Africa"] <- "East and Central Africa"
+  ### Shorten "Eastern Asia, South Eastern Asia And Oceania Excluding Australia & New Zealand" region
+  Stunt_data_w_cov$All_africa_HIW[Stunt_data_w_cov$All_africa_HIW=="Eastern Asia, South Eastern Asia And Oceania Excluding Australia & New Zealand"] <- "Eastern Asia, South Eastern Asia And Oceania"
+  
   
   ### Check data to see if n' are correct
   length(unique(Stunt_data_w_cov$ISO.code))
