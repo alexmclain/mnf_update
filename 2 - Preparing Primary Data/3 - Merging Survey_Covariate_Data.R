@@ -18,9 +18,9 @@ marker <- as.character(commandArgs(trailingOnly = TRUE))
 month <- "Feb" #for appending filename
 year <- "2026"
 
-#### Note: "Imputation of IHME covariate data_multiple_impute.R" or
-#### "Imputation of IHME covariate data_single_impute.R" must 
-#### be ran before you can commence (as appropriate).
+#### Note: "1 - Preparing Covariates/Imputation of IHME covariate data_multiple_impute.R" 
+#### must be run before you can commence. It creates both the multiple imputation 
+#### (Multiple_Imputed_*.rds) and the single (mean) imputation (Single_Impute_*.rds) files.
 
 ### If doing for multiple imputation set as TRUE, otherwise FALSE
 multiple_imputation_vec <- c(TRUE,FALSE)
