@@ -144,9 +144,18 @@ for(multiple_imputation in multiple_imputation_vec){
       )
   
   ### Merge regional groupings with data ###
-  Stunt_data_w_cov <- merge(Stunt_data_w_cov,reg_groups,by="ISO.code",all = TRUE)
+  ### Only keeping countries with covariate data (all.x), crosswalk-only countries are dropped.
+  Stunt_data_w_cov <- merge(Stunt_data_w_cov,reg_groups,by="ISO.code",all.x = TRUE)
   data_miss <- Stunt_data_w_cov[is.na(Stunt_data_w_cov$All_africa_HIW),]
-  Stunt_data_w_cov$All_africa_HIW <- apply(as.matrix(tolower(as.character(Stunt_data_w_cov$All_africa_HIW))),1,simpleCap)
+  if(nrow(data_miss) > 0){
+    warning("No region in the crosswalk for: ",
+            paste(unique(as.character(data_miss$ISO.code)), collapse = ", "))
+  }
+  ### Capitalizing the region names (missing regions stay NA).
+  region_chr <- tolower(as.character(Stunt_data_w_cov$All_africa_HIW))
+  Stunt_data_w_cov$All_africa_HIW <- ifelse(
+    is.na(region_chr), NA_character_, vapply(region_chr, simpleCap, character(1), USE.NAMES = FALSE)
+  )
   Stunt_data_w_cov$country <- as.character(Stunt_data_w_cov$Country)
   ### Shorten "Eastern Asia, South Eastern Asia And Oceania Excluding Australia & New Zealand" region
   Stunt_data_w_cov$All_africa_HIW[Stunt_data_w_cov$All_africa_HIW=="Eastern Asia, South Eastern Asia And Oceania Excluding Australia & New Zealand"] <- "Eastern Asia, South Eastern Asia And Oceania"

@@ -28,12 +28,18 @@ stunt_data_slim <- stunt_data %>%
            grepl("nadjust",Notes) ~ 1,
            grepl("nadjust",StandardFootnotes) ~ 1,
            TRUE ~ 0
-         ), 
-         # Creating a fake UNICEF ID when one is missing. 
-         UNICEFSurveyID = case_when(
-           !is.na(UNICEFSurveyID) ~ UNICEFSurveyID,
-           is.na(UNICEFSurveyID) ~ max_unicefid + as.numeric(row_number())
-         ))
+         )
+  ) %>% 
+  # Creating a fake UNICEF ID when one is missing. All rows (sexes and age 
+  # ranges) from the same country, year, and source share the same fake ID.
+  group_by(country, year, ShortSource) %>% 
+  mutate(
+    UNICEFSurveyID = case_when(
+      !is.na(UNICEFSurveyID) ~ UNICEFSurveyID,
+      TRUE ~ max_unicefid + as.numeric(cur_group_id())
+    )
+  ) %>% 
+  ungroup()
 
 ##### Clean up the notes variable #####
 stunt_data_slim <- stunt_data_slim %>% 
@@ -61,23 +67,25 @@ stunt_data_slim <- stunt_data_slim %>%
 sort(unique(stunt_data_slim$Notes))
 
 ## Combining like categories
+# Patterns are anchored so that e.g. "0-23 months" does not match "10-23 months".
+anch <- function(x) paste0("(^|[^0-9])", x)
 stunt_data_slim <- stunt_data_slim %>% 
   mutate(
     Notes = case_when(
-      grepl("0-23 months",Notes) ~ "Age interval 0-23 months",
-      grepl("0-35 months",Notes) ~ "Age interval 0-36 months",
-      grepl("0-36 months",Notes) ~ "Age interval 0-36 months",
-      grepl("0-47 months",Notes) ~ "Age interval 0-48 months",
-      grepl("0-48 months",Notes) ~ "Age interval 0-48 months",
-      grepl("0-52 months",Notes) ~ "Age interval 0-52 months",
+      grepl(anch("0-23 months"),Notes) ~ "Age interval 0-23 months",
+      grepl(anch("0-35 months"),Notes) ~ "Age interval 0-36 months",
+      grepl(anch("0-36 months"),Notes) ~ "Age interval 0-36 months",
+      grepl(anch("0-47 months"),Notes) ~ "Age interval 0-48 months",
+      grepl(anch("0-48 months"),Notes) ~ "Age interval 0-48 months",
+      grepl(anch("0-52 months"),Notes) ~ "Age interval 0-52 months",
       grepl("1-4;",Notes)        ~ "Age interval 12-60 months",
-      grepl("12-60 months",Notes) ~ "Age interval 12-60 months",
-      grepl("12-59 months",Notes) ~ "Age interval 12-60 months",
-      grepl("24-59 months",Notes) ~ "Age interval 24-60 months",
-      grepl("3-36 months",Notes) ~ "Age interval 3-36 months",
-      grepl("36-59 months",Notes) ~ "Age interval 36-60 months",
-      grepl("5-47 months",Notes) ~ "Age interval 6-48 months",
-      grepl("6-36 months",Notes) ~ "Age interval 6-36 months",
+      grepl(anch("12-60 months"),Notes) ~ "Age interval 12-60 months",
+      grepl(anch("12-59 months"),Notes) ~ "Age interval 12-60 months",
+      grepl(anch("24-59 months"),Notes) ~ "Age interval 24-60 months",
+      grepl(anch("3-36 months"),Notes) ~ "Age interval 3-36 months",
+      grepl(anch("36-59 months"),Notes) ~ "Age interval 36-60 months",
+      grepl(anch("5-47 months"),Notes) ~ "Age interval 6-48 months",
+      grepl(anch("6-36 months"),Notes) ~ "Age interval 6-36 months",
       TRUE ~ Notes
     )
   )
@@ -157,17 +165,7 @@ all_data <- stunt_data_slim %>%
   mutate(Y2 = Y-nat) %>%  
   arrange(UNICEFSurveyID) %>% 
   mutate(Age_range=as.character(Age_range)) %>% 
-  ungroup() %>% 
-  mutate(
-    # Flagging the national estimate and survey's with small sample size for removal.
-    # National surveys will not be used in the analysis (since they are 0 by definition)
-    # Survey's with small sample size will be treated as missing.
-    flag = case_when(
-      Age_range == "National" ~ 0,
-      unweighted_N < 30 ~ 0,
-      TRUE ~ 1
-    )
-  )
+  ungroup()
 
 ### Create extra rows for the missing age ranges (so they can be predicted)
 ### Only done if Sex is in the data.
@@ -177,12 +175,21 @@ all_data <- all_data %>%
   filter(Age_range != "6 to 8 months" & 
            Age_range != "9 to 11 months") %>% 
   complete(UNICEFSurveyID, Sex, Age_range) %>% 
-  fill(country, year, nat, unadj_ind, .direction = "updown") %>% 
+  # Fill within survey (and survey-by-sex for the sex-specific national value)
+  group_by(UNICEFSurveyID) %>% 
+  fill(country, year, unadj_ind, .direction = "updown") %>% 
   group_by(UNICEFSurveyID, Sex) %>% 
+  fill(nat, .direction = "updown") %>% 
   filter(!all(is.na(Y))) %>% 
   ungroup() %>% 
+  # Flagging missing age groups, the national estimate and estimates with a small 
+  # sample size for removal. National estimates are not used in the analysis 
+  # (the difference is 0 by definition). Estimates with a small sample size 
+  # are treated as missing (and predicted).
   mutate(flag = case_when(
     is.na(Y) ~ 0,
+    Age_range == "National" ~ 0,
+    !is.na(unweighted_N) & unweighted_N < 30 ~ 0,
     TRUE ~ 1
   ))
 
@@ -239,7 +246,24 @@ anova.lme(fitted_model)
 ### and the predicted age level prevalence by adding the national prevalence
 pred <- predict( fitted_model, newdata = all_data)
 stunt_data_w_pred <- all_data %>% 
-  add_column( pred = pred) %>% 
+  add_column( pred = pred) 
+
+## Age groups that must be imputed but could not be predicted by the model 
+## (e.g., countries not in the model fit). These are set equal to the national 
+## prevalence (difference of 0). Reporting them here.
+fallback_ind <- stunt_data_w_pred$flag == 0 & 
+  stunt_data_w_pred$Age_range != "National" & 
+  is.na(stunt_data_w_pred$pred)
+message(sum(fallback_ind), " imputed age-group rows had no model prediction ",
+        "and were set to the national prevalence.")
+if(any(fallback_ind)){
+  print(
+    stunt_data_w_pred[fallback_ind, ] %>% 
+      count(country, UNICEFSurveyID, Sex, name = "n_fallback")
+  )
+}
+
+stunt_data_w_pred <- stunt_data_w_pred %>% 
   mutate(
     pred = case_when(
       Age_range == "National" ~ 0, 
@@ -269,46 +293,45 @@ stunt_data_w_pred <- all_data %>%
 
 ### Using all of the predicted age level prevalence to predict the 
 ### national level prevalence (if adjustement is necessary)
-Age_vec <- sort(unique(stunt_data_w_pred$Age_range))
-q_vec <- c(6,12,12,12,12,6)/(60)
+# Proportion of the 0-59 month period covered by each age group.
+q_vec <- c(
+  "0 to 5 months" = 6, "6 to 11 months" = 6, "12 to 23 months" = 12,
+  "24 to 35 months" = 12, "36 to 47 months" = 12, "48 to 59 months" = 12
+)/60
 UN_ID <- unique(stunt_data_w_pred$UNICEFSurveyID)
 for(j in UN_ID){
-  t_data_all <- stunt_data_w_pred %>% 
-    filter(UNICEFSurveyID==j) %>% 
-    arrange(Age_range) %>% 
-    filter(Age_range != "National")
-  sex_vals <- unique(t_data_all$Sex)
+  t_data_surv <- stunt_data_w_pred %>% 
+    filter(UNICEFSurveyID==j) 
+  sex_vals <- unique(t_data_surv$Sex)
   for(k in sex_vals){
-    t_data <- t_data_all %>% filter(Sex == k)
-    L <- max(t_data$unadj_ind)
-    if(L==0){
-      if(all(is.na(t_data$Notes))){
-        stunt_data_w_pred$Adj_PointEstimate[
-          stunt_data_w_pred$Age_range=="National" & 
-            stunt_data_w_pred$UNICEFSurveyID==j &
-            stunt_data_w_pred$Sex == k
-        ] <- stunt_data_w_pred$PointEstimate[
-          stunt_data_w_pred$Age_range=="National" & 
-            stunt_data_w_pred$UNICEFSurveyID==j &
-            stunt_data_w_pred$Sex == k
-        ]
-      }
+    # All rows (including national) for this survey and sex
+    t_data_sex <- t_data_surv %>% filter(Sex == k)
+    # Standard age groups only, in the order of q_vec
+    t_data <- t_data_sex %>% 
+      filter(Age_range %in% names(q_vec)) %>% 
+      arrange(match(Age_range, names(q_vec)))
+    # Partial age range or unadjusted survey?
+    partial <- max(t_data_sex$unadj_ind, na.rm = TRUE) == 1 | 
+      any(!is.na(t_data_sex$Notes))
+    is_nat <- stunt_data_w_pred$Age_range=="National" & 
+      stunt_data_w_pred$UNICEFSurveyID==j &
+      stunt_data_w_pred$Sex == k
+    if(!partial || nrow(t_data) == 0){
+      stunt_data_w_pred$Adj_PointEstimate[is_nat] <- 
+        stunt_data_w_pred$PointEstimate[is_nat]
     }else{
       t_data$weighted_N[t_data$flag==0] <- NA
       #### Calculating the sample size in each category (desired N is from the weighted N of the study)
-      weights_vec <- q_vec
+      q_k <- q_vec[t_data$Age_range]
+      weights_vec <- q_k
       if(any(!is.na(t_data$weighted_N))){weights_vec <- t_data$weighted_N}
       if(any(is.na(weights_vec))){
-        total_N <- sum(weights_vec[!is.na(weights_vec)])/(sum(q_vec[!is.na(weights_vec)]))
-        weights_vec[is.na(weights_vec)] <- total_N*q_vec[is.na(weights_vec)]
+        total_N <- sum(weights_vec[!is.na(weights_vec)])/(sum(q_k[!is.na(weights_vec)]))
+        weights_vec[is.na(weights_vec)] <- total_N*q_k[is.na(weights_vec)]
       }
       weights_vec <- weights_vec/sum(weights_vec)
       weighted_est <- sum(t_data$Adj_PointEstimate*weights_vec)
-      stunt_data_w_pred$Adj_PointEstimate[
-        stunt_data_w_pred$Age_range=="National" & 
-          stunt_data_w_pred$UNICEFSurveyID==j &
-          stunt_data_w_pred$Sex == k
-      ] <- weighted_est
+      stunt_data_w_pred$Adj_PointEstimate[is_nat] <- weighted_est
     }
   }
 }

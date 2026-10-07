@@ -115,7 +115,7 @@ long_data_w_unweighted_N %>%
 
 long_data_w_N %>% 
   select(
-    -c(weighted_N_over, unweighted_N, prop_ww_N, prop_wu_N,)# StandardError_LO)
+    -c(weighted_N_over, unweighted_N, prop_ww_N, prop_wu_N)# StandardError_LO)
   ) %>% 
   rename(
     unweighted_N = unweighted_N_SO

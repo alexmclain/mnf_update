@@ -24,17 +24,20 @@ for(multiple_imputation in multiple_imputation_vec){
   if(multiple_imputation){
     surv_data <- read_rds(paste0("Data/Merged/",year,"/",marker,"_",month,"_reg_all_multiple_impute.rds"))
     keys <- c("ISO.code","Sex", ".imp")
-    
-    surv_data %>%
-      count(across(all_of(keys))) %>%
-      filter(n < 36)
   }else{
     surv_data <- read_rds(paste0("Data/Merged/",year,"/",marker,"_",month,"_reg_all_mean_multiple.rds")) 
     keys <- c("ISO.code","Sex")
-    
-    surv_data %>%
-      count(across(all_of(keys))) %>%
-      filter(n < 36)
+  }
+  
+  ## Every country/sex(/imputation) should have a row for each year.
+  n_years <- n_distinct(surv_data$year)
+  short_keys <- surv_data %>%
+    count(across(all_of(keys))) %>%
+    filter(n < n_years)
+  if(nrow(short_keys) > 0){
+    warning(nrow(short_keys), " combinations of ", paste(keys, collapse = "/"),
+            " have fewer than ", n_years, " rows.")
+    print(short_keys)
   }
   
   # View(test %>% arrange(across(all_of(keys))) %>% select(all_of(keys), everything()))
@@ -144,8 +147,11 @@ for(multiple_imputation in multiple_imputation_vec){
   
   #### 2. Running linear mixed models to predict missing sex groups ####
   ### Predicting for Females
+  ### Rows must be contiguous by country (and ordered the same way as the 
+  ### prediction data) for the random effects design matrix (make_Z_noPcov).
   surv_wide <-  surv_wide_B %>%  
     filter(.imp <= 1) %>% 
+    arrange(country, year, UNICEFSurveyID) %>% 
     mutate(Source = relevel(factor(All_africa_HIW), ref = "Southern Asia")) %>% 
     dplyr::select(-c(".imp"))
   
@@ -217,8 +223,6 @@ for(multiple_imputation in multiple_imputation_vec){
   # Extracting countries that were not used in the original analysis
   cov_data_not_used <- all_data[not_in(all_data$country,data_frame$country),]
   
-  pred_all_noC <- 0
-  sigma_Y_all_noC <- 0
   if(nrow(cov_data_not_used)>0){
     # Predicting for them
     Xi.full <- cbind(model.matrix(formula_x ,data=all_data))
@@ -237,6 +241,10 @@ for(multiple_imputation in multiple_imputation_vec){
     all_data <- left_join(all_data, pred_new_data_noC)
     plot(all_data$Point.Estimate_Both, all_data$pred_all_noC)
     lines(c(0,100),c(0,100))
+  }else{
+    ## All countries were used in the fit; columns are needed for the final merge.
+    all_data$pred_all_noC <- NA_real_
+    all_data$sigma_Y_all_noC <- NA_real_
   }
   
   ### Final data for Female
@@ -370,8 +378,6 @@ for(multiple_imputation in multiple_imputation_vec){
   # Extracting countries that were not used in the original analysis
   cov_data_not_used <- all_data[not_in(all_data$country,data_frame$country),]
   
-  pred_all_noC <- 0
-  sigma_Y_all_noC <- 0
   if(nrow(cov_data_not_used)>0){
     # Predicting for them
     Xi.full <- cbind(model.matrix(formula_x,data=all_data))
@@ -390,6 +396,10 @@ for(multiple_imputation in multiple_imputation_vec){
     all_data <- merge(all_data,pred_new_data_noC,all.x=TRUE)
     plot(all_data$Point.Estimate_Both, all_data$pred_all_noC)
     lines(c(0,100),c(0,100))
+  }else{
+    ## All countries were used in the fit; columns are needed for the final merge.
+    all_data$pred_all_noC <- NA_real_
+    all_data$sigma_Y_all_noC <- NA_real_
   }
   
   surv_wide_Male <- surv_wide_B %>% 
@@ -495,8 +505,11 @@ for(multiple_imputation in multiple_imputation_vec){
   ## Checking for duplicates
   final_merge_nodup <- final_merge %>% 
     distinct()
-  final_merge
-  final_merge_nodup
+  if(nrow(final_merge_nodup) < nrow(final_merge)){
+    warning(nrow(final_merge) - nrow(final_merge_nodup), 
+            " duplicate rows were removed before exporting.")
+  }
+  final_merge <- final_merge_nodup
   
   # Exporting
   if(multiple_imputation){

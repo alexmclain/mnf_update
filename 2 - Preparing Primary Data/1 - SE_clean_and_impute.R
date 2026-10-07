@@ -34,7 +34,7 @@ if (is.null(surv_data$unweighted_N)) {
 
 surv_data_sm <- surv_data |>
   filter((!is.na(unweighted_N) & unweighted_N < 6) | (!is.na(weighted_N)  & weighted_N < 6))
-if(nrow(surv_data_sm)>1){
+if(nrow(surv_data_sm)>0){
   write_csv(
     surv_data_sm,
     paste0("Data/JME/", year, "/Cleaned/", marker, "_smallN.csv")
@@ -285,7 +285,7 @@ pred[miss_ind] <- full_pred
 full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
 # Add one standard deviation of the random intercept dispersion for predictions 
 # with no other values from their country
-re_sd <- as.numeric(VarCorr(fitted_model))[4]
+re_sd <- as.numeric(VarCorr(fitted_model)["(Intercept)", "StdDev"])
 pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 pred[surv_data$P1mP==0] <- NA
 surv_data = surv_data %>% bind_cols(Pred_SE = exp(pred))
@@ -315,7 +315,7 @@ if(sum(miss_ind) != length(full_pred)){
 full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
 # Add one standard deviation of the random intercept dispersion for predictions 
 # with no other values from their country
-re_sd <- as.numeric(VarCorr(fitted_model))[4]
+re_sd <- as.numeric(VarCorr(fitted_model)["(Intercept)", "StdDev"])
 pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 pred[surv_data$P1mP==0] <- NA
 surv_data = surv_data %>% bind_cols(Pred_SE_noN = exp(pred))
@@ -339,7 +339,7 @@ pred[miss_ind] <- full_pred
 full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
 # Add one standard deviation of the random intercept dispersion for predictions 
 # with no other values from their country
-re_sd <- as.numeric(VarCorr(fitted_model))[4]
+re_sd <- as.numeric(VarCorr(fitted_model)["(Intercept)", "StdDev"])
 pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 pred[surv_data$P1mP==0] <- NA
 surv_data = surv_data %>% bind_cols(Pred_SE_zeroN = exp(pred))
@@ -360,12 +360,13 @@ pred[miss_ind] <- full_pred
 full_pred2 <- predict(fitted_model, newdata = surv_data, na.action = na.omit, level = 0)
 # Add one standard deviation of the random intercept dispersion for predictions 
 # with no other values from their country
-re_sd <- as.numeric(VarCorr(fitted_model))[4]
+re_sd <- as.numeric(VarCorr(fitted_model)["(Intercept)", "StdDev"])
 pred[miss_ind & is.na(pred)] = full_pred2[is.na(full_pred)] + re_sd
 surv_data = surv_data %>% bind_cols(Pred_SE_noP1mP = exp(pred))
 
 #### Setting the SE_val to the appropriate predicted value.
-surv_data$SE_val <- surv_data$Standard.Error
+## Start from the outlier-cleaned SE (outlying SE's are NA) so they are re-imputed.
+surv_data$SE_val <- surv_data$SE
 surv_data$SE_val[is.na(surv_data$SE_val)] <- surv_data$Pred_SE[is.na(surv_data$SE_val)]
 surv_data$SE_val[is.na(surv_data$SE_val)] <- surv_data$Pred_SE_noN[is.na(surv_data$SE_val)]
 surv_data$SE_val[is.na(surv_data$SE_val)] <- surv_data$Pred_SE_zeroN[is.na(surv_data$SE_val)]
