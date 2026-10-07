@@ -4,17 +4,20 @@ library(this.path)
 wd <- dirname(this.path::here())
 print(wd)
 setwd(wd)
-
 source("Utils/Programs_Feb_2020.R")
+
 library(tidyverse)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
+if (length(marker) != 1) {
+  stop("Expected exactly one marker argument.")
+}
 
-month <- "Jul" #Month Key to name file
-year <- "2025" #Year Key to name file
+month <- "Feb" #Month Key to name file
+year <- "2026" #Year Key to name file
 
-month_o <- "Jul" #Month Key to find data
-year_o <- "2025"#Year Key to find data
+month_o <- "Feb" #Month Key to find data
+year_o <- "2026"#Year Key to find data
 marker_f <- paste0("")
 
 date <- paste(marker_f,month,year) #for appending filename
@@ -22,11 +25,17 @@ date <- paste(marker_f,month,year) #for appending filename
 
 path = paste0("Data/Analysis files/",marker,"/")
 
-
-Estimation <- readRDS(paste0(path,"/Mi_files/","Estimation ",marker,"",marker_f,".rds"))
+estimation_path <- paste0(path,"/Mi_files/","Estimation ",marker,"",marker_f,".rds")
+if (!file.exists(estimation_path)) {
+  stop("Missing Estimation file: ", estimation_path)
+}
+Estimation <- readRDS(estimation_path)
 
 ### Summarizing imputed samples:
 boot_vals <- Estimation$boot_vals
+if (length(boot_vals) == 0) {
+  stop("boot_vals is empty; cannot summarize imputations.")
+}
 Point.Est_mat <- NULL
 Point.Est_fixed_mat <- NULL
 Point.Est_fixpen_mat <- NULL
@@ -34,7 +43,11 @@ Var_mean_mat <- NULL
 Var_pred_mat <- NULL
 B <- length(boot_vals)
 for(j in boot_vals){
-  plot_data <- read_rds(paste0(path,"/Mi_files/","/Plot data for ",marker,"",marker_f," imputation ",j,".rds"))
+  plot_path <- paste0(path,"/Mi_files/","/Plot data for ",marker,"",marker_f," imputation ",j,".rds")
+  if (!file.exists(plot_path)) {
+    stop("Missing plot data file: ", plot_path)
+  }
+  plot_data <- read_rds(plot_path)
   cat(dim(plot_data),"\n")
   Point.Est_mat <- cbind(Point.Est_mat,plot_data$pred)
   Point.Est_fixed_mat <- cbind(Point.Est_fixed_mat,plot_data$pred_fixed)
@@ -62,7 +75,7 @@ remove(list = c("Point.Est_mat","Point.Est_fixed_mat",
 
 
 data_one <- readRDS(paste0("Data/Merged/",year_o,"/",marker,"_",month_o,"_final_multiple_impute.rds")) %>% 
-  filter(.imp == j | .imp == 0) %>% 
+  filter(.imp == B | .imp == 0) %>% 
   ### Getting rid of a Morocco survey for severe overweight that appears to be incorrect.
   # mutate(
   #   Point.Estimate.NS = case_when(
@@ -74,8 +87,8 @@ data_one <- readRDS(paste0("Data/Merged/",year_o,"/",marker,"_",month_o,"_final_
   #     TRUE ~ Point.Estimate.Imp
   #   )
   # ) %>% 
+  
   dplyr::select(-".imp")
 
 ### Outputting the data to "path" folder.
 output_function(plot_data, Estimation, data_one, marker, date, path)
-

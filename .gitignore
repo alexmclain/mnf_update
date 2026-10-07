@@ -1,2 +1,11 @@
 *.DS_Store 
 *.Rhistory
+*.rds
+*.csv
+*.xls
+*.xlsx
+*.RData
+Data/JME/.DS_Store
+/Figures
+1 - Preparing Covariates/.Rhistory
+3 - Model/.Rhistory

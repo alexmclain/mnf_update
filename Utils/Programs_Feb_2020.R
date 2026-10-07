@@ -2222,7 +2222,3 @@ output_function <- function(plot_data, Estimation, data_one, marker, date,path){
   write.csv(PP_plot_data,paste0(path,marker," results ",date,".csv",sep=""),row.names = FALSE)
   
 }
-
-
-
-

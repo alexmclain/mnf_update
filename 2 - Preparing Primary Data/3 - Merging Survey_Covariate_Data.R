@@ -15,8 +15,8 @@ simpleCap <- function(x) {
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
-month <- "Jul" #for appending filename
-year <- "2025"
+month <- "Feb" #for appending filename
+year <- "2026"
 
 #### Note: "Imputation of IHME covariate data_multiple_impute.R" or
 #### "Imputation of IHME covariate data_single_impute.R" must 
@@ -44,12 +44,13 @@ for(multiple_imputation in multiple_imputation_vec){
   num <- cov_data_dis %>% 
     group_by(Sex,year,ISO.code) %>% 
     summarise(n = n())
+  
   cov_data <- cov_data_dis %>% 
     left_join(num) %>% 
     group_by(Sex,year,ISO.code) %>% 
     mutate(.imp = row_number() - 1*I(n == 1)) %>% 
     ungroup() %>% 
-    select(-c("n"))
+    dplyr::select(-c("n"))
   
   ## Reading in covariate and Cleaned (by Age and SE) data.
   stunt_res <- read_rds(
@@ -68,9 +69,43 @@ for(multiple_imputation in multiple_imputation_vec){
   ### Get the total number of primary data sources before merging.
   length(stunt_res$Point.Estimate[!is.na(stunt_res$Point.Estimate)])
   
+  
+  # 1. Ensure covariates are unique per .imp + ISO + year + Sex.
+  cov_data_keyed <- cov_data %>%
+    distinct(ISO.code, year, Sex, .imp, .keep_all = TRUE)
+  
+  # 2. Expand surveys across .imp if needed.
+  if (multiple_imputation) {
+    stunt_res_expanded <- stunt_res %>%
+      tidyr::crossing(.imp = sort(unique(cov_data_keyed$.imp)))
+  } else {
+    stunt_res_expanded <- stunt_res %>%
+      mutate(.imp = 0)
+  }
+  
+  test <- cov_data_keyed %>%
+    left_join(
+      stunt_res_expanded,
+      by = c("ISO.code", "year", "Sex", ".imp"),
+      relationship = "one-to-many"
+    )
+  
+  keys <- c("ISO.code", "year", "Sex", ".imp", "UNICEFSurveyID")
+  # View(test %>% arrange(across(all_of(keys))) %>% select(all_of(keys), everything()))
+  
+  test %>%
+    count(across(all_of(keys))) %>%
+    filter(n > 1)
+  
+  
+  # 3. Keep cov-only rows too
   ### Merge with covariate data
-  Stunt_data_w_cov <- cov_data %>% 
-    full_join(stunt_res, relationship = "many-to-many") %>% 
+  Stunt_data_w_cov <- cov_data_keyed %>%
+    left_join(
+      stunt_res_expanded,
+      by = c("ISO.code", "year", "Sex", ".imp"),
+      relationship = "one-to-many"
+    ) %>% 
     dplyr::select(-c("Country")) %>% 
     dplyr::rename("Country"="location_name") %>% 
     filter(year>1989) %>% 
@@ -83,10 +118,7 @@ for(multiple_imputation in multiple_imputation_vec){
   Stunt_data_w_cov <- Stunt_data_w_cov %>% 
     arrange(ISO.code, Country, year, Sex, UNICEFSurveyID) %>% 
     mutate(ISO.code  = as.factor(ISO.code),
-           year_ID = case_when(
-             is.na(UNICEFSurveyID) ~ year,
-             !is.na(UNICEFSurveyID) ~ year+UNICEFSurveyID
-           ), 
+           year_ID = paste0(year, UNICEFSurveyID, sep = "_"), 
            UNICEFSurveyID = case_when(
              is.na(UNICEFSurveyID) ~ 0,
              !is.na(UNICEFSurveyID) ~ UNICEFSurveyID

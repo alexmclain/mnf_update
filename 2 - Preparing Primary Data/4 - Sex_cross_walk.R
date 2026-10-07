@@ -13,8 +13,8 @@ library(dplyr)
 
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-month <- "Jul" #for appending filename
-year <- "2025"
+month <- "Feb" #for appending filename
+year <- "2026"
 
 ### If doing for multiple imputation set as TRUE, otherwise FALSE
 multiple_imputation_vec <- c(TRUE,FALSE)
@@ -23,9 +23,21 @@ multiple_imputation_vec <- c(TRUE,FALSE)
 for(multiple_imputation in multiple_imputation_vec){
   if(multiple_imputation){
     surv_data <- read_rds(paste0("Data/Merged/",year,"/",marker,"_",month,"_reg_all_multiple_impute.rds"))
+    keys <- c("ISO.code","Sex", ".imp")
+    
+    surv_data %>%
+      count(across(all_of(keys))) %>%
+      filter(n < 36)
   }else{
     surv_data <- read_rds(paste0("Data/Merged/",year,"/",marker,"_",month,"_reg_all_mean_multiple.rds")) 
+    keys <- c("ISO.code","Sex")
+    
+    surv_data %>%
+      count(across(all_of(keys))) %>%
+      filter(n < 36)
   }
+  
+  # View(test %>% arrange(across(all_of(keys))) %>% select(all_of(keys), everything()))
   
   
   
@@ -59,10 +71,7 @@ for(multiple_imputation in multiple_imputation_vec){
     ) %>% 
     filter(.imp <= 1) %>% 
     mutate(
-      year_ID = case_when(
-        is.na(UNICEFSurveyID) ~ year,
-        !is.na(UNICEFSurveyID) ~ year+UNICEFSurveyID
-      ), 
+      year_ID = paste0(year, UNICEFSurveyID, sep = "_"), 
       UNICEFSurveyID = case_when(
         is.na(UNICEFSurveyID) ~ 0,
         !is.na(UNICEFSurveyID) ~ UNICEFSurveyID
@@ -403,8 +412,8 @@ for(multiple_imputation in multiple_imputation_vec){
         TRUE ~ Point.Estimate_Male
       ),
       SE_pred = case_when(
-        is.na(Point.Estimate_Male) ~ sqrt(SE_val_Female^2 + sigma_Y_all), 
-        TRUE ~ SE_val_Female
+        is.na(Point.Estimate_Male) ~ sqrt(SE_val_Male^2 + sigma_Y_all), 
+        TRUE ~ SE_val_Male
       )
     ) 
   

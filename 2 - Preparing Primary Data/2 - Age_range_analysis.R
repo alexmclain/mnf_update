@@ -10,7 +10,7 @@ library(dplyr)
 library(nlme)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-year <- "2025"
+year <- "2026"
 
 stunt_data <- readRDS(paste0("Data/JME/",year,"/Cleaned/",marker,"_SE_clean.rds"))
 
@@ -70,7 +70,6 @@ stunt_data_slim <- stunt_data_slim %>%
       grepl("0-47 months",Notes) ~ "Age interval 0-48 months",
       grepl("0-48 months",Notes) ~ "Age interval 0-48 months",
       grepl("0-52 months",Notes) ~ "Age interval 0-52 months",
-      grepl("0-52 months",Notes) ~ "Age interval 0-52 months",
       grepl("1-4;",Notes)        ~ "Age interval 12-60 months",
       grepl("12-60 months",Notes) ~ "Age interval 12-60 months",
       grepl("12-59 months",Notes) ~ "Age interval 12-60 months",
@@ -129,6 +128,19 @@ national_only <- stunt_data_slim %>%
   filter(Age_range == "National")  %>% 
   select(c(country, year, nat, Sex, UNICEFSurveyID)) 
 
+## Checking the uniqueness of the keys
+keys <- c("country", "year", "UNICEFSurveyID", "Sex", "Age_range")
+
+dup_x <- stunt_data_slim %>%
+  count(across(all_of(keys))) %>%
+  filter(n > 1)
+
+dup_y <- national_only %>%
+  count(across(all_of(keys[-5]))) %>%
+  filter(n > 1)
+
+dup_x
+dup_y
 
 
 ### Transforming data to difference from national estimate
@@ -161,6 +173,9 @@ all_data <- stunt_data_slim %>%
 ### Only done if Sex is in the data.
 
 all_data <- all_data %>% 
+  # Removing sparse age ranges
+  filter(Age_range != "6 to 8 months" & 
+           Age_range != "9 to 11 months") %>% 
   complete(UNICEFSurveyID, Sex, Age_range) %>% 
   fill(country, year, nat, unadj_ind, .direction = "updown") %>% 
   group_by(UNICEFSurveyID, Sex) %>% 
@@ -288,7 +303,7 @@ for(j in UN_ID){
         weights_vec[is.na(weights_vec)] <- total_N*q_vec[is.na(weights_vec)]
       }
       weights_vec <- weights_vec/sum(weights_vec)
-      weighted_est <- sum(t_data$Adj_PointEstimate*q_vec)
+      weighted_est <- sum(t_data$Adj_PointEstimate*weights_vec)
       stunt_data_w_pred$Adj_PointEstimate[
         stunt_data_w_pred$Age_range=="National" & 
           stunt_data_w_pred$UNICEFSurveyID==j &
@@ -302,8 +317,18 @@ for(j in UN_ID){
 nat_only <- stunt_data_w_pred %>%
  filter(Age_range=="National") %>%
  mutate(Diff = PointEstimate - Adj_PointEstimate)
-# nat_only %>%
-#   View()
+# nat_only %>% View()
+
+## Checking the uniqueness of the keys
+keys <- c("country", "year", "UNICEFSurveyID", "Sex")
+
+dup_x <- nat_only %>%
+  count(across(all_of(keys))) %>%
+  filter(n > 1)
+
+dup_x
+
+
 
 ggplot(data=nat_only, aes(x=PointEstimate,y=Diff)) +
  geom_point() +

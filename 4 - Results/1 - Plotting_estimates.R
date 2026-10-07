@@ -10,11 +10,11 @@ setwd(wd)
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
 
-month <- "Jul" #Month Key to name file
-year <- "2025" #Year Key to name file
+month <- "Feb" #Month Key to name file
+year <- "2026" #Year Key to name file
 
-month_o <- "Jul" #Month Key to find data
-year_o <- "2025"#Year Key to find data
+month_o <- "Feb" #Month Key to find data
+year_o <- "2026"#Year Key to find data
 marker_f <- paste0("")
 
 # marker_f <- paste0(marker," Global_2_sp")
@@ -25,13 +25,24 @@ name <- paste("")#
 measure = marker
 if(grepl("Sev",marker)){
   measure = "Severe Overweight"
+  if(grepl("Was",marker)){
+    measure = "Severe Wasting"
+  }
 }
 
 path_data = paste0("Data/Analysis files/",marker,"/")
 path_fig = paste0("Figures/",marker,"/",month,year,"/")
 
-all_data <- readRDS(paste0("Data/Merged/",year_o,"/",marker,"_",
-                           month_o,"_final_multiple_impute.rds")) %>% 
+merged_path <- paste0("Data/Merged/",year_o,"/",marker,"_",
+                      month_o,"_final_multiple_impute.rds")
+if (!file.exists(merged_path)) {
+  stop("Missing merged input file: ", merged_path)
+}
+if (!dir.exists(path_fig)) {
+  dir.create(path_fig, recursive = TRUE, showWarnings = FALSE)
+}
+
+all_data <- readRDS(merged_path) %>% 
   filter(.imp == 1 | .imp == 0) %>% 
   ### Getting rid of a Morocco survey for severe overweight that appears to be incorrect.
   # mutate(
@@ -69,6 +80,9 @@ all_data <- readRDS(paste0("Data/Merged/",year_o,"/",marker,"_",
 
 
 filename <- paste(path_data,marker," results ",date,".csv",sep="")
+if (!file.exists(filename)) {
+  stop("Missing plot input file: ", filename)
+}
 
 PP_plot_data <- read.csv(filename)
 
@@ -97,10 +111,13 @@ for(j in Sex_m){
   
   ################## ONLY INCLUDING COUNTRIES WITH DATA #####################
   
-  Countries_w_data <- unique(all_data$country[all_data$country %in% unique(all_data$country[!is.na(all_data$Y)])])
+  Countries_w_data <- unique(all_data$country[!is.na(all_data$Y)])
   
   reg_vals <- sort(as.character(unique(all_data$Region)))
-  Lim_U <- max(P_plot_data$upper_CI2)
+  Lim_U <- max(P_plot_data$upper_CI2, na.rm = TRUE)
+  if (!is.finite(Lim_U)) {
+    stop("upper_CI2 has no finite values; cannot set y-axis limit.")
+  }
   
   ############################### FIXED SCALES ###############################
   
@@ -110,6 +127,9 @@ for(j in Sex_m){
     t_country <- unique(P_plot_data$country[P_plot_data$Region==k])
     plot_data <- P_plot_data[P_plot_data$country %in% t_country,]
     plot_data <- plot_data[plot_data$country %in% Countries_w_data,]
+    if (nrow(plot_data) == 0) {
+      next
+    }
     data_two <- plot_data
     
     ymn <- plot_data$Y-2*(plot_data$SE_var)
@@ -139,7 +159,7 @@ for(j in Sex_m){
   dev.off()
   
   
-  if(!is.null(P_plot_data$adj_pred)){
+  if("adj_pred" %in% names(P_plot_data)){
   
   pdf(paste(path_fig,marker," estimates ",date_j,".pdf",sep = ""),width = 15, height = 8)
   for(k in reg_vals){
@@ -147,6 +167,9 @@ for(j in Sex_m){
     t_country <- unique(P_plot_data$country[P_plot_data$Region==k])
     plot_data <- P_plot_data[P_plot_data$country %in% t_country,]
     plot_data <- plot_data[plot_data$country %in% Countries_w_data,]
+    if (nrow(plot_data) == 0) {
+      next
+    }
     data_two <- plot_data
     
     ymn <- plot_data$adj_pred-2*(plot_data$SE_var)
@@ -187,6 +210,9 @@ for(j in Sex_m){
     t_country <- unique(P_plot_data$country[P_plot_data$Region==k])
     plot_data <- P_plot_data[P_plot_data$country %in% t_country,]
     data_two <- plot_data
+    if (nrow(plot_data) == 0) {
+      next
+    }
     
     ymn <- plot_data$Y-2*(plot_data$SE_var)
     ymn[ymn<0] <- 0
@@ -215,13 +241,19 @@ for(j in Sex_m){
   
   ############################## Plotting fixed, pen-fixed and full #############################
   
-  Lim_U <- max(P_plot_data$pred)
+  Lim_U <- max(P_plot_data$pred, na.rm = TRUE)
+  if (!is.finite(Lim_U)) {
+    stop("pred has no finite values; cannot set y-axis limit.")
+  }
   pdf(paste(path_fig,marker," fixed penfixed and full estimates ",date_j,".pdf",sep = ""),width = 15, height = 8)
   for(k in reg_vals){
     reg_nice <- reg_vals[k==reg_vals]
     t_country <- unique(all_data$country[all_data$Region==k])
     plot_data <- P_plot_data[P_plot_data$country %in% t_country,]
     data_two <- plot_data
+    if (nrow(plot_data) == 0) {
+      next
+    }
     
     ### Stacking the data to get different types
     
@@ -260,8 +292,11 @@ for(j in Sex_m){
 ####### Plots comparing Female, Male, and Overall estimates
 
   P_plot_data <- as_tibble(PP_plot_data) 
-  Countries_w_data <- unique(P_plot_data$country[P_plot_data$country %in% unique(P_plot_data$country[!is.na(P_plot_data$Y)])])
-  Lim_U <- max(P_plot_data$upper_CI2)
+  Countries_w_data <- unique(P_plot_data$country[!is.na(P_plot_data$Y)])
+  Lim_U <- max(P_plot_data$upper_CI2, na.rm = TRUE)
+  if (!is.finite(Lim_U)) {
+    stop("upper_CI2 has no finite values; cannot set y-axis limit.")
+  }
   
   pdf(paste0(path_fig,marker," comparison by Sex NS_",name,".pdf"),width = 15, height = 8)
   
@@ -270,6 +305,9 @@ for(j in Sex_m){
     t_country <- as.character(unique(P_plot_data$country[P_plot_data$Region==k]))
     plot_data <- P_plot_data[P_plot_data$country %in% t_country,]
     plot_data <- plot_data[plot_data$country %in% Countries_w_data,]
+    if (nrow(plot_data) == 0) {
+      next
+    }
     
     
     ymn <- plot_data$Y
@@ -291,7 +329,6 @@ for(j in Sex_m){
   }
   
   dev.off()
-
 
 
 

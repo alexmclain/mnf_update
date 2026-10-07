@@ -8,12 +8,12 @@ source("Utils/Programs_Feb_2020.R")
 library(tidyverse)
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-year <- "2025"
-month <- "Jul" #for finding the data
+year <- "2026"
+month <- "Feb" #for finding the data
 marker_f <- paste0(marker,"")
 
 #### 1. Setting Model Parameters #### 
-if(grepl("St",marker)){
+if(grepl("St",marker, ignore.case = TRUE)){
   model_formula <- ~Sex + Region + MCI_5_yr+ I(MCI_5_yr^2) + SDI + 
     MCI_5_yr:Sex+ I(MCI_5_yr^2):Sex + Region:Sex
   
@@ -83,7 +83,7 @@ for(j in 1:B){
     rename("Y" = "Point.Estimate.NS", 
            "Y_all" = "Point.Estimate.Imp",
            "SE_var" = "SE_val") %>% 
-    arrange(country, year) #%>% filter(!is.na(Y))
+    arrange(country, year) %>% filter(!is.na(Y))
   
   
   cat(j,length(unique(all_data$country)), 
@@ -111,6 +111,7 @@ for(j in 1:B){
     )
   
   if(marker == "Stunting"){
+  # if(grepl("St",marker, ignore.case = TRUE)){
     DF_R <- quantile(data_w_out$year,probs = c(0.5))
     B.knots <- c(min(data_w_out$year[!is.na(data_w_out$Y)])-1, 
                  max(data_w_out$year[!is.na(data_w_out$Y)])+2)
