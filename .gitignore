@@ -1,11 +1,13 @@
-*.DS_Store 
-*.Rhistory
+.DS_Store
+.Rhistory
+Rplots.pdf
 *.rds
 *.csv
 *.xls
 *.xlsx
 *.RData
-Data/JME/.DS_Store
 /Figures
-1 - Preparing Covariates/.Rhistory
-3 - Model/.Rhistory
+# Rendered Quarto reports (regenerate with quarto render)
+*.html
+CLAUDE.md
+Data/IHME_covs/.Rhistory

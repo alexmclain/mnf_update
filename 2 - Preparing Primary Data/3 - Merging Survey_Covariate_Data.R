@@ -15,42 +15,37 @@ simpleCap <- function(x) {
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
 
-month <- "Feb" #for appending filename
+month <- "Oct" #for appending filename
 year <- "2026"
 
-#### Note: "1 - Preparing Covariates/Imputation of IHME covariate data_multiple_impute.R" 
-#### must be run before you can commence. It creates both the multiple imputation 
-#### (Multiple_Imputed_*.rds) and the single (mean) imputation (Single_Impute_*.rds) files.
+#### Note: "1 - Preparing Covariates/02 - Imputation.qmd" must be run before you can
+#### commence. It creates both the multiple imputation (Multiple_Imputed_*.rds) and
+#### the single (mean) imputation (Single_Impute_*.rds) files.
+imputed_label <- "Oct2026" # label of the files created by 02 - Imputation.qmd
 
 ### If doing for multiple imputation set as TRUE, otherwise FALSE
 multiple_imputation_vec <- c(TRUE,FALSE)
 
 for(multiple_imputation in multiple_imputation_vec){
   if(multiple_imputation){
-    cov_data <- readRDS("Data/IHME_covs/Multiple_Imputed_Mar2023.rds")
+    cov_data <- readRDS(paste0("Data/IHME_covs/Multiple_Imputed_",imputed_label,".rds")) %>% 
+      filter(!is.na(.imp)) # countries that were not imputed
   }else{
-    cov_data <- readRDS("Data/IHME_covs/Single_Impute_Mar2023.rds") %>% 
+    cov_data <- readRDS(paste0("Data/IHME_covs/Single_Impute_",imputed_label,".rds")) %>% 
+      filter(!is.na(SDI)) %>% # countries that were not imputed
       mutate(.imp = 0)
   }
   
-  #### Keeping only distinct rows ####
-  cov_data_dis <- cov_data %>% 
-    group_by(Sex,year,ISO.code,.imp) %>% 
-    filter(row_number()==1) %>% 
-    ungroup() %>% 
-    dplyr::select(-".imp") %>% 
-    distinct(.keep_all = TRUE) 
+  ## SEV is not used
+  cov_data <- cov_data %>% 
+    dplyr::select(-any_of("SEV"))
   
-  num <- cov_data_dis %>% 
-    group_by(Sex,year,ISO.code) %>% 
-    summarise(n = n())
-  
-  cov_data <- cov_data_dis %>% 
-    left_join(num) %>% 
-    group_by(Sex,year,ISO.code) %>% 
-    mutate(.imp = row_number() - 1*I(n == 1)) %>% 
-    ungroup() %>% 
-    dplyr::select(-c("n"))
+  #### One row per country/year/sex/imputation ####
+  ## Rows are kept for every imputation, even where covariates are identical 
+  ## across imputations (observed years); the model needs the full grid for 
+  ## each .imp.
+  cov_data <- cov_data %>% 
+    distinct(ISO.code, year, Sex, .imp, .keep_all = TRUE)
   
   ## Reading in covariate and Cleaned (by Age and SE) data.
   stunt_res <- read_rds(
@@ -100,6 +95,10 @@ for(multiple_imputation in multiple_imputation_vec){
   
   # 3. Keep cov-only rows too
   ### Merge with covariate data
+  ### Surveys are merged on the integer year, so covariates are from the
+  ### integer year and a survey with a non-integer middle_year fills the
+  ### existing country-year row (no extra row). middle_year is NA for
+  ### covariate-only rows here; it is filled in "4 - Sex_cross_walk.R".
   Stunt_data_w_cov <- cov_data_keyed %>%
     left_join(
       stunt_res_expanded,
@@ -112,8 +111,15 @@ for(multiple_imputation in multiple_imputation_vec){
     arrange(.imp, Country, year, Sex) %>% 
     dplyr::select(-c(M49, country)) %>% 
     dplyr::select(ISO.code, Country, year, Sex, everything())
-  
-  
+
+  ## The model identifies countries by name, so each ISO code must have exactly
+  ## one name in every year (otherwise those years become a separate country).
+  name_check <- Stunt_data_w_cov %>% distinct(ISO.code, Country) %>% count(ISO.code) %>% filter(n > 1)
+  if (nrow(name_check) > 0) {
+    stop("More than one country name for: ", paste(name_check$ISO.code, collapse = ", "),
+         ". Fix the names in 1 - Preparing Covariates/02 - Imputation.qmd.")
+  }
+
   ### Ensuring only 1 observation per survey/year/sex/.imp
   Stunt_data_w_cov <- Stunt_data_w_cov %>% 
     arrange(ISO.code, Country, year, Sex, UNICEFSurveyID) %>% 
@@ -136,7 +142,7 @@ for(multiple_imputation in multiple_imputation_vec){
   
   
   ### Load in and edit regional groupings ###
-  reg_groups <- read_xlsx("Data/Country/Crosswalk_Jan_2025.xlsx") %>% 
+  reg_groups <- read_xlsx("Data/Country/Crosswalk_Oct_2026.xlsx") %>% 
     select(-"CountryorArea") %>% 
     rename(
       ISO.code = MNF_Country_Code,
@@ -182,15 +188,9 @@ for(multiple_imputation in multiple_imputation_vec){
   # Changing estimates=0 to the minimum value
   min_val_pr <- min(Stunt_data_w_cov$Point.Estimate[Stunt_data_w_cov$Point.Estimate>0],na.rm=TRUE)
   min_val_SE <- min(Stunt_data_w_cov$SE_val[Stunt_data_w_cov$SE_val>0],na.rm=TRUE)
-  # Standardizing SDI by Sex
-  # Setting the Region variable
   Stunt_data_w_cov <- as_tibble(Stunt_data_w_cov) %>% 
-    group_by(Sex) %>% 
-    mutate(SEV.Z = scale(SEV)) %>% 
-    ungroup(Sex) %>% 
     arrange(Country,year) %>% 
     mutate(
-      SEV.Z = SEV.Z[,1],
       SE_val = case_when(
         SE_val == 0 ~ min_val_SE/100,
         TRUE ~ SE_val/100

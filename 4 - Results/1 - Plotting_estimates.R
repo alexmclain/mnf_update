@@ -7,20 +7,29 @@ print(wd)
 setwd(wd)
 
 
-marker <- as.character(commandArgs(trailingOnly = TRUE))
+# Usage: Rscript "4 - Results/1 - Plotting_estimates.R" <marker> [max_year] [model]
+#   max_year (optional): only plot years <= max_year. Default: plot all years.
+#   model (optional): model tag used in 2 - Analysis_MI.R (e.g. "fpi"); figures go
+#   to Figures/<marker>/<month><year>_<model>/.
+args <- as.character(commandArgs(trailingOnly = TRUE))
+marker <- args[1]
+num_args <- suppressWarnings(as.numeric(args[-1]))
+max_year <- if (any(!is.na(num_args))) num_args[!is.na(num_args)][1] else Inf
+model_tag <- if (any(is.na(num_args))) args[-1][is.na(num_args)][1] else ""
 
 
-month <- "Feb" #Month Key to name file
+month <- "Oct" #Month Key to name file
 year <- "2026" #Year Key to name file
 
-month_o <- "Feb" #Month Key to find data
+month_o <- "Oct" #Month Key to find data
 year_o <- "2026"#Year Key to find data
-marker_f <- paste0("")
+marker_f <- model_tag
 
 # marker_f <- paste0(marker," Global_2_sp")
 date <- paste(marker_f,month,year)
 
 name <- paste("")#
+if (is.finite(max_year)) name <- paste("through", max_year)  # tags output file names
 
 measure = marker
 if(grepl("Sev",marker)){
@@ -31,7 +40,7 @@ if(grepl("Sev",marker)){
 }
 
 path_data = paste0("Data/Analysis files/",marker,"/")
-path_fig = paste0("Figures/",marker,"/",month,year,"/")
+path_fig = paste0("Figures/",marker,"/",month,year,if (model_tag != "") paste0("_",model_tag),"/")
 
 merged_path <- paste0("Data/Merged/",year_o,"/",marker,"_",
                       month_o,"_final_multiple_impute.rds")
@@ -72,11 +81,12 @@ all_data <- readRDS(merged_path) %>%
     )
   ) %>% 
   select(c("country","year", "Point.Estimate.NS", "Point.Estimate.Imp","SE_val", "ShortSource",
-           "Region","SEV", "Sex", "SMART", "Surveillance", "MCI_5_yr", "SDI")) %>% 
+           "Region", "Sex", "SMART", "Surveillance", "SDI", everything())) %>% 
   rename("Y" = "Point.Estimate.NS", 
          "Y_all" = "Point.Estimate.Imp",
          "SE_var" = "SE_val") %>% 
-  arrange(country, year) 
+  arrange(country, year) %>% 
+  filter(year <= max_year)
 
 
 filename <- paste(path_data,marker," results ",date,".csv",sep="")
@@ -89,7 +99,11 @@ PP_plot_data <- read.csv(filename)
 PP_plot_data <- PP_plot_data %>% 
   rename(
     "Y"="Point.Estimate.Imp","SE_var"="SSE_imp","pred"="Prediction","lower_CI2"="lower_PI","upper_CI2"="upper_PI"
-  ) 
+  ) %>%
+  filter(year <= max_year) %>%
+  # Plot on the model's time scale: surveys at their middle_year, annual rows
+  # at the integer year (middle_year == year), so the lines follow one curve.
+  mutate(year = middle_year)
 
 Sex_m <- c("Overall", "Male", "Female")
 

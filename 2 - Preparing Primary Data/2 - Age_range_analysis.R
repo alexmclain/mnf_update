@@ -167,171 +167,215 @@ all_data <- stunt_data_slim %>%
   mutate(Age_range=as.character(Age_range)) %>% 
   ungroup()
 
-### Create extra rows for the missing age ranges (so they can be predicted)
-### Only done if Sex is in the data.
+### The age adjustment model needs age-disaggregated estimates. Some inputs
+### (e.g., the CMRS national/sex extract) only have national and sex-specific
+### estimates; then the age model is skipped and estimates are not adjusted.
+has_age_groups <- any(all_data$Age_range != "National" & !is.na(all_data$Y))
 
-all_data <- all_data %>% 
-  # Removing sparse age ranges
-  filter(Age_range != "6 to 8 months" & 
-           Age_range != "9 to 11 months") %>% 
-  complete(UNICEFSurveyID, Sex, Age_range) %>% 
-  # Fill within survey (and survey-by-sex for the sex-specific national value)
-  group_by(UNICEFSurveyID) %>% 
-  fill(country, year, unadj_ind, .direction = "updown") %>% 
-  group_by(UNICEFSurveyID, Sex) %>% 
-  fill(nat, .direction = "updown") %>% 
-  filter(!all(is.na(Y))) %>% 
-  ungroup() %>% 
-  # Flagging missing age groups, the national estimate and estimates with a small 
-  # sample size for removal. National estimates are not used in the analysis 
-  # (the difference is 0 by definition). Estimates with a small sample size 
-  # are treated as missing (and predicted).
-  mutate(flag = case_when(
-    is.na(Y) ~ 0,
-    Age_range == "National" ~ 0,
-    !is.na(unweighted_N) & unweighted_N < 30 ~ 0,
-    TRUE ~ 1
-  ))
-
-### Setting flagged rows to NA.
-all_data <- all_data %>% 
-  mutate(
-    Y2 = case_when(
-      flag==0 ~ NA_real_,
-      Age_range=="National" ~ NA_real_,
-      TRUE ~ Y2
-    )
-  ) %>% 
-  # Create new age range variable that will not have "national" and be a factor.
-  arrange(country,year) %>% 
-  mutate( 
-    Age_range2 = if_else( 
-      Age_range=="National", 
-      "0 to 5 months", 
-      Age_range
-    )
-  ) %>%
-  mutate( 
-    Age_range2 = relevel( 
-      as.factor(Age_range2), 
-      ref = "36 to 47 months"
-    )
-  )
-
-
-
-
-
-### Running the model
-
-## Setting the regression form based on if multiple sex's are included.
-n_sex <- length(unique(all_data$Sex))
-if(n_sex > 1){
-  mm_form <- Y2 ~ Age_range2 + nat + nat:Age_range2 + year + Sex + Sex:Age_range2
+if(!has_age_groups){
+  n_partial <- all_data %>%
+    filter(unadj_ind == 1 | !is.na(Notes)) %>%
+    distinct(UNICEFSurveyID) %>%
+    nrow()
+  message("No age-disaggregated estimates in the data; skipping age adjustment. ",
+          n_partial, " surveys with a partial age range or unadjusted ",
+          "estimates are left unadjusted.")
+  stunt_data_w_pred <- all_data %>%
+    rename("PointEstimate"="Y") %>%
+    mutate(Adj_PointEstimate = PointEstimate) %>%
+    select(-c(Y2, nat))
 }else{
-  mm_form <- Y2 ~ Age_range2 + nat + nat:Age_range2 + year
-}
+  ### Create extra rows for the missing age ranges (so they can be predicted)
+  ### Only done if Sex is in the data.
 
-fitted_model <- lme(
-  mm_form,
-  random=~1|country,
-  weights = varExp(form=~SE_val),
-  data = all_data,
-  na.action = na.omit
-)
-summary(fitted_model)
-anova.lme(fitted_model)
+  all_data <- all_data %>% 
+    # Removing sparse age ranges
+    filter(Age_range != "6 to 8 months" & 
+             Age_range != "9 to 11 months") %>% 
+    complete(UNICEFSurveyID, Sex, Age_range) %>% 
+    # Fill within survey (and survey-by-sex for the sex-specific national value)
+    group_by(UNICEFSurveyID) %>% 
+    fill(country, year, any_of("middle_year"), unadj_ind, .direction = "updown") %>%
+    group_by(UNICEFSurveyID, Sex) %>% 
+    fill(nat, .direction = "updown") %>% 
+    filter(!all(is.na(Y))) %>% 
+    ungroup() %>% 
+    # Flagging missing age groups, the national estimate and estimates with a small 
+    # sample size for removal. National estimates are not used in the analysis 
+    # (the difference is 0 by definition). Estimates with a small sample size 
+    # are treated as missing (and predicted).
+    mutate(flag = case_when(
+      is.na(Y) ~ 0,
+      Age_range == "National" ~ 0,
+      !is.na(unweighted_N) & unweighted_N < 30 ~ 0,
+      TRUE ~ 1
+    ))
 
-### Getting the predicted difference between national and age level prevalence
-### and the predicted age level prevalence by adding the national prevalence
-pred <- predict( fitted_model, newdata = all_data)
-stunt_data_w_pred <- all_data %>% 
-  add_column( pred = pred) 
+  ### Setting flagged rows to NA.
+  all_data <- all_data %>% 
+    mutate(
+      Y2 = case_when(
+        flag==0 ~ NA_real_,
+        Age_range=="National" ~ NA_real_,
+        TRUE ~ Y2
+      )
+    ) %>% 
+    # Create new age range variable that will not have "national" and be a factor.
+    arrange(country,year) %>% 
+    mutate( 
+      Age_range2 = if_else( 
+        Age_range=="National", 
+        "0 to 5 months", 
+        Age_range
+      )
+    ) %>%
+    mutate( 
+      Age_range2 = relevel( 
+        as.factor(Age_range2), 
+        ref = "36 to 47 months"
+      )
+    )
 
-## Age groups that must be imputed but could not be predicted by the model 
-## (e.g., countries not in the model fit). These are set equal to the national 
-## prevalence (difference of 0). Reporting them here.
-fallback_ind <- stunt_data_w_pred$flag == 0 & 
-  stunt_data_w_pred$Age_range != "National" & 
-  is.na(stunt_data_w_pred$pred)
-message(sum(fallback_ind), " imputed age-group rows had no model prediction ",
-        "and were set to the national prevalence.")
-if(any(fallback_ind)){
-  print(
-    stunt_data_w_pred[fallback_ind, ] %>% 
-      count(country, UNICEFSurveyID, Sex, name = "n_fallback")
+
+
+
+
+  ### Running the model
+
+  ## Setting the regression form based on if multiple sex's are included.
+  n_sex <- length(unique(all_data$Sex))
+  if(n_sex > 1){
+    mm_form <- Y2 ~ Age_range2 + nat + nat:Age_range2 + year + Sex + Sex:Age_range2
+  }else{
+    mm_form <- Y2 ~ Age_range2 + nat + nat:Age_range2 + year
+  }
+
+  fitted_model <- lme(
+    mm_form,
+    random=~1|country,
+    weights = varExp(form=~SE_val),
+    data = all_data,
+    na.action = na.omit
   )
-}
+  summary(fitted_model)
+  anova.lme(fitted_model)
 
-stunt_data_w_pred <- stunt_data_w_pred %>% 
-  mutate(
-    pred = case_when(
-      Age_range == "National" ~ 0, 
-      is.na(pred) ~ 0, 
-      TRUE ~ pred
-    ),
-    Y2 = case_when(
-      flag == 0 ~ pred, 
-      TRUE ~ Y2
+  ### Getting the predicted difference between national and age level prevalence
+  ### and the predicted age level prevalence by adding the national prevalence
+  ## predict.lme fails on missing predictors (e.g., no national estimate `nat`
+  ## for a survey/sex), so only rows with all predictors are predicted; the rest
+  ## stay NA and are handled by the fallback below.
+  pred_vars <- intersect(
+    c("Age_range2", "nat", "year", "Sex", "country"), names(all_data)
+  )
+  pred_ok <- complete.cases(all_data[, pred_vars])
+  message(sum(!pred_ok), " rows have missing predictors and were not predicted.")
+  pred <- rep(NA_real_, nrow(all_data))
+  ## Countries with no usable age-group data are not in the fit (no random
+  ## effect), so predict.lme returns NA for them at the country level. They are
+  ## predicted from the fixed effects only (level = 0, average age pattern).
+  in_fit <- all_data$country %in% unique(fitted_model$groups$country)
+  ok_fit <- pred_ok & in_fit
+  ok_new <- pred_ok & !in_fit
+  pred[ok_fit] <- as.numeric(
+    predict( fitted_model, newdata = all_data[ok_fit, ])
+  )
+  if(any(ok_new)){
+    pred[ok_new] <- as.numeric(
+      predict( fitted_model, newdata = all_data[ok_new, ], level = 0)
     )
-  ) %>% 
-  rename(
-    "PointEstimate"="Y"
-  ) %>% 
-  mutate(
-    Adj_PointEstimate = case_when(
-      Age_range == "National" ~ PointEstimate, 
-      TRUE ~ Y2+nat
-    ),
-    Adj_PointEstimate = case_when(
-      Adj_PointEstimate < 0 ~ 0, 
-      TRUE ~ Adj_PointEstimate
+    message(sum(ok_new), " rows from countries not in the model fit (",
+            paste(unique(all_data$country[ok_new]), collapse = ", "),
+            ") were predicted from the fixed effects only.")
+  }
+  stunt_data_w_pred <- all_data %>% 
+    add_column( pred = pred) 
+
+  ## Age groups that must be imputed but could not be predicted by the model 
+  ## (e.g., countries not in the model fit). These are set equal to the national 
+  ## prevalence (difference of 0). Reporting them here.
+  fallback_ind <- stunt_data_w_pred$flag == 0 & 
+    stunt_data_w_pred$Age_range != "National" & 
+    is.na(stunt_data_w_pred$pred)
+  message(sum(fallback_ind), " imputed age-group rows had no model prediction ",
+          "and were set to the national prevalence.")
+  if(any(fallback_ind)){
+    print(
+      stunt_data_w_pred[fallback_ind, ] %>% 
+        count(country, UNICEFSurveyID, Sex, name = "n_fallback")
     )
-  )  %>% 
-  select(-c(Age_range2,Y2,pred,nat))
+  }
+
+  stunt_data_w_pred <- stunt_data_w_pred %>% 
+    mutate(
+      pred = case_when(
+        Age_range == "National" ~ 0, 
+        is.na(pred) ~ 0, 
+        TRUE ~ pred
+      ),
+      Y2 = case_when(
+        flag == 0 ~ pred, 
+        TRUE ~ Y2
+      )
+    ) %>% 
+    rename(
+      "PointEstimate"="Y"
+    ) %>% 
+    mutate(
+      Adj_PointEstimate = case_when(
+        Age_range == "National" ~ PointEstimate, 
+        TRUE ~ Y2+nat
+      ),
+      Adj_PointEstimate = case_when(
+        Adj_PointEstimate < 0 ~ 0, 
+        TRUE ~ Adj_PointEstimate
+      )
+    )  %>% 
+    select(-c(Age_range2,Y2,pred,nat))
 
 
-### Using all of the predicted age level prevalence to predict the 
-### national level prevalence (if adjustement is necessary)
-# Proportion of the 0-59 month period covered by each age group.
-q_vec <- c(
-  "0 to 5 months" = 6, "6 to 11 months" = 6, "12 to 23 months" = 12,
-  "24 to 35 months" = 12, "36 to 47 months" = 12, "48 to 59 months" = 12
-)/60
-UN_ID <- unique(stunt_data_w_pred$UNICEFSurveyID)
-for(j in UN_ID){
-  t_data_surv <- stunt_data_w_pred %>% 
-    filter(UNICEFSurveyID==j) 
-  sex_vals <- unique(t_data_surv$Sex)
-  for(k in sex_vals){
-    # All rows (including national) for this survey and sex
-    t_data_sex <- t_data_surv %>% filter(Sex == k)
-    # Standard age groups only, in the order of q_vec
-    t_data <- t_data_sex %>% 
-      filter(Age_range %in% names(q_vec)) %>% 
-      arrange(match(Age_range, names(q_vec)))
-    # Partial age range or unadjusted survey?
-    partial <- max(t_data_sex$unadj_ind, na.rm = TRUE) == 1 | 
-      any(!is.na(t_data_sex$Notes))
-    is_nat <- stunt_data_w_pred$Age_range=="National" & 
-      stunt_data_w_pred$UNICEFSurveyID==j &
-      stunt_data_w_pred$Sex == k
-    if(!partial || nrow(t_data) == 0){
-      stunt_data_w_pred$Adj_PointEstimate[is_nat] <- 
-        stunt_data_w_pred$PointEstimate[is_nat]
-    }else{
-      t_data$weighted_N[t_data$flag==0] <- NA
-      #### Calculating the sample size in each category (desired N is from the weighted N of the study)
-      q_k <- q_vec[t_data$Age_range]
-      weights_vec <- q_k
-      if(any(!is.na(t_data$weighted_N))){weights_vec <- t_data$weighted_N}
-      if(any(is.na(weights_vec))){
-        total_N <- sum(weights_vec[!is.na(weights_vec)])/(sum(q_k[!is.na(weights_vec)]))
-        weights_vec[is.na(weights_vec)] <- total_N*q_k[is.na(weights_vec)]
+  ### Using all of the predicted age level prevalence to predict the 
+  ### national level prevalence (if adjustement is necessary)
+  # Proportion of the 0-59 month period covered by each age group.
+  q_vec <- c(
+    "0 to 5 months" = 6, "6 to 11 months" = 6, "12 to 23 months" = 12,
+    "24 to 35 months" = 12, "36 to 47 months" = 12, "48 to 59 months" = 12
+  )/60
+  UN_ID <- unique(stunt_data_w_pred$UNICEFSurveyID)
+  for(j in UN_ID){
+    t_data_surv <- stunt_data_w_pred %>% 
+      filter(UNICEFSurveyID==j) 
+    sex_vals <- unique(t_data_surv$Sex)
+    for(k in sex_vals){
+      # All rows (including national) for this survey and sex
+      t_data_sex <- t_data_surv %>% filter(Sex == k)
+      # Standard age groups only, in the order of q_vec
+      t_data <- t_data_sex %>% 
+        filter(Age_range %in% names(q_vec)) %>% 
+        arrange(match(Age_range, names(q_vec)))
+      # Partial age range or unadjusted survey?
+      partial <- max(t_data_sex$unadj_ind, na.rm = TRUE) == 1 | 
+        any(!is.na(t_data_sex$Notes))
+      is_nat <- stunt_data_w_pred$Age_range=="National" & 
+        stunt_data_w_pred$UNICEFSurveyID==j &
+        stunt_data_w_pred$Sex == k
+      if(!partial || nrow(t_data) == 0){
+        stunt_data_w_pred$Adj_PointEstimate[is_nat] <- 
+          stunt_data_w_pred$PointEstimate[is_nat]
+      }else{
+        t_data$weighted_N[t_data$flag==0] <- NA
+        #### Calculating the sample size in each category (desired N is from the weighted N of the study)
+        q_k <- q_vec[t_data$Age_range]
+        weights_vec <- q_k
+        if(any(!is.na(t_data$weighted_N))){weights_vec <- t_data$weighted_N}
+        if(any(is.na(weights_vec))){
+          total_N <- sum(weights_vec[!is.na(weights_vec)])/(sum(q_k[!is.na(weights_vec)]))
+          weights_vec[is.na(weights_vec)] <- total_N*q_k[is.na(weights_vec)]
+        }
+        weights_vec <- weights_vec/sum(weights_vec)
+        weighted_est <- sum(t_data$Adj_PointEstimate*weights_vec)
+        stunt_data_w_pred$Adj_PointEstimate[is_nat] <- weighted_est
       }
-      weights_vec <- weights_vec/sum(weights_vec)
-      weighted_est <- sum(t_data$Adj_PointEstimate*weights_vec)
-      stunt_data_w_pred$Adj_PointEstimate[is_nat] <- weighted_est
     }
   }
 }

@@ -28,7 +28,11 @@ library(janitor)
 library(slider)
 library(stringr)
 library(this.path)
-setwd(paste0(dirname(this.dir()),"/Data/IHME_covs"))
+# knitr resets the working directory after every chunk, so setwd() alone only
+# lasts for this chunk. root.dir makes it apply to the whole document.
+data_dir <- paste0(dirname(this.dir()),"/Data/IHME_covs")
+knitr::opts_knit$set(root.dir = data_dir)
+setwd(data_dir)
 
 GDP_wide_dat <- read_xls("API_NY.GDP.PCAP.KD.ZG_DS2_en_excel_v2_51.xls")
 
@@ -48,6 +52,65 @@ GDP_dat <- GDP_wide_dat |>
   filter(
     year > 1989
   )
+
+# GDP per capita growth (annual %) is `gdp`. The GDP per capita level (current US$)
+# is read below as `gdp_pc` (World Bank NY.GDP.PCAP.CD).
+GDP_pc_dat <- read_csv("API_NY.GDP.PCAP.CD_DS2_en_csv_v2_468810.csv",
+                       show_col_types = FALSE) |>
+  select(`Country Code`, matches("^[0-9]{4}$")) |>
+  pivot_longer(
+    cols = -`Country Code`,
+    names_to = "year",
+    values_to = "gdp_pc") |>
+  rename(country_code = `Country Code`) |>
+  mutate(year = as.numeric(year)) |>
+  filter(year > 1989)
+
+# The level must be positive (it is log-transformed in the imputation)
+stopifnot(all(GDP_pc_dat$gdp_pc > 0, na.rm = TRUE))
+
+GDP_dat <- GDP_dat |>
+  left_join(GDP_pc_dat, by = c("country_code", "year"))
+
+# Share of rows with each GDP measure
+GDP_dat |> summarise(across(c(gdp, gdp_pc), \(x) mean(!is.na(x))))
+```
+
+# Immunization
+
+DPT immunization (% of children ages 12-23 months, `SH.IMM.IDPT`) from the World Bank, a measure of health system access. The file (`Immun_skilled_WB_data_Oct26.csv`) is in long format (one row per series and country) and also has births attended by skilled health staff (`SH.STA.BRTC.ZS`), which is not used because it is observed for too few country-years.
+
+```{r}
+imm_dat <- read_csv("Immun_skilled_WB_data_Oct26.csv",
+                            col_types = cols(.default = "c")) |>
+  # drops the footnote rows at the end of the World Bank file
+  filter(!is.na(`Series Code`)) |>
+  select(series = `Series Code`, country_code = `Country Code`,
+         matches("^[0-9]{4} ")) |>
+  pivot_longer(
+    cols = -c(series, country_code),
+    names_to = "year",
+    values_to = "value") |>
+  mutate(
+    year = as.numeric(substr(year, 1, 4)),
+    value = suppressWarnings(as.numeric(value))
+  ) |>
+  filter(year > 1989) |>
+  filter(series == "SH.IMM.IDPT") |>
+  select(country_code, year, dpt_imm = value)
+
+# Percentages
+stopifnot(all(imm_dat$dpt_imm >= 0 & imm_dat$dpt_imm <= 100, na.rm = TRUE),
+          !anyDuplicated(imm_dat[, c("country_code", "year")]))
+
+GDP_dat <- GDP_dat |>
+  left_join(imm_dat, by = c("country_code", "year"))
+
+# Share of rows observed, by year
+GDP_dat |>
+  group_by(year) |>
+  summarise(across(dpt_imm, \(x) round(mean(!is.na(x)), 2))) |>
+  print(n = 40)
 ```
 
 
@@ -204,7 +267,9 @@ gdp_w_country <- gdp_w_country |>
     gdp_w_country |>
       filter(year == 2025) |>
       mutate(year = 2026, 
-             gdp = NA_real_)
+             gdp = NA_real_,
+             gdp_pc = NA_real_,
+             dpt_imm = NA_real_)
   ) |> 
   arrange(country, year)
 ```
@@ -259,9 +324,15 @@ shock_data |>
 war_terror_data |> 
   anti_join(shock_data)
 
-shock_war <- shock_data |> 
-  left_join(war_terror_data) |> 
-  left_join(location_data) |> 
+# Join the location hierarchy on location_id only: the IHME covariate files
+# store some names with broken encoding ("CÃ´te d'Ivoire", "TÃ¼rkiye") and
+# "Taiwan" vs "Taiwan (Province of China)", so joining on location_name as well
+# dropped those countries at the level == 3 filter.
+shock_war <- shock_data |>
+  left_join(war_terror_data, by = c("location_id", "year")) |>
+  select(-location_name.y) |>
+  rename(location_name = location_name.x) |>
+  left_join(location_data |> select(-location_name), by = "location_id") |>
   filter(level == 3)
 ```
 
@@ -607,3 +678,103 @@ covariates |>
 write_csv(covariates, "FPI_GDP_IHMESHOCK.csv")
 ```
 
+
+
+# Adding WPP demographic indicators and SDI
+
+Both files are merged onto `covariates` (the FPI/GDP/IHME shock data created above), so the country universe stays the same. WPP is keyed on M49 code (`LocID`, which agrees with `m49_code` for every ISO3 shared between the files) and SDI is keyed on the GBD `location_id`.
+
+## WPP 2024 demographic indicators
+
+```{r}
+wpp <- read_csv("WPP2024_Demographic_Country_Indicators_Medium.csv") |>
+  filter(
+    LocTypeName == "Country/Area",
+    year <= max(covariates$year, na.rm = TRUE)
+  ) |>
+  select(-c(SortOrder, Notes, ISO2_code, SDMX_code, LocTypeID, LocTypeName,
+            ParentID, VarID, Variant)) |>
+  rename(
+    m49_code = LocID,
+    wpp_location = Location
+  )
+
+# Should be zero rows (no duplicate keys)
+wpp |> count(m49_code, year) |> filter(n > 1)
+
+# WPP countries/areas with no match in the FPI/GDP/IHME data. These are mostly
+# small territories (and Taiwan) and will be dropped.
+wpp |>
+  anti_join(covariates, by = "m49_code") |>
+  distinct(ISO3_code, wpp_location) |>
+  print(n = 50)
+
+# Covariate rows that cannot be matched because they have no M49 code
+covariates |>
+  filter(is.na(m49_code)) |>
+  distinct(country, gbd_location_id)
+```
+
+```{r}
+covariates_wpp <- covariates |>
+  left_join(wpp, by = c("m49_code", "year"))
+
+# Should agree wherever both are present
+covariates_wpp |>
+  filter(!is.na(ISO3_code), !is.na(country_code), ISO3_code != country_code) |>
+  distinct(country, country_code, ISO3_code)
+
+# Countries (with GBD ids) that never picked up WPP data
+covariates_wpp |>
+  group_by(country, m49_code, gbd_location_id) |>
+  filter(all(is.na(TPopulation1July))) |>
+  ungroup() |>
+  distinct(country, m49_code, gbd_location_id)
+
+covariates_wpp <- covariates_wpp |>
+  select(-c(ISO3_code, wpp_location))
+```
+
+## SDI
+
+SDI covers 1950-2023, so 2024-2026 will be missing after the merge.
+
+```{r}
+sdi <- read_csv("sdi_gbd_2023.csv") |>
+  clean_names() |>
+  rename(
+    gbd_location_id = location_id,
+    sdi_location = location
+  )
+
+# Should be zero rows (no duplicate keys)
+sdi |> count(gbd_location_id, year) |> filter(n > 1)
+
+# SDI locations not in the covariate data (expected: Taiwan)
+sdi |>
+  anti_join(covariates_wpp, by = "gbd_location_id") |>
+  distinct(gbd_location_id, sdi_location)
+
+covariates_all <- covariates_wpp |>
+  left_join(sdi, by = c("gbd_location_id", "year"))
+
+# Covariate countries with a GBD id but no SDI (should be none)
+covariates_all |>
+  filter(!is.na(gbd_location_id)) |>
+  group_by(gbd_location_id, country) |>
+  filter(all(is.na(sdi))) |>
+  ungroup() |>
+  distinct(gbd_location_id, country)
+
+# Should be zero rows: the merges must not add or duplicate rows
+nrow(covariates_all) - nrow(covariates)
+covariates_all |>
+  filter(!is.na(gbd_location_id)) |>
+  count(gbd_location_id, year) |>
+  filter(n > 1)
+
+covariates_all <- covariates_all |>
+  select(-sdi_location)
+
+write_csv(covariates_all, "FPI_GDP_IHMESHOCK_WPP_SDI.csv")
+```

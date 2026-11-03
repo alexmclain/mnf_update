@@ -16,9 +16,9 @@ year <- "2026"
 file_xls <- paste0("Data/JME/", year, "/Raw/", handle, marker, ".xls")
 file_xlsx <- paste0("Data/JME/", year, "/Raw/", handle, marker, ".xlsx")
 
-t1 <- try(surv_data <- read_excel(file_xls), silent = TRUE)
+t1 <- try(surv_data <- read_excel(file_xls, guess_max = 1e6), silent = TRUE)
 if (inherits(t1, "try-error")) {
-  surv_data <- read_excel(file_xlsx)
+  surv_data <- read_excel(file_xlsx, guess_max = 1e6)
 }
 P_surv_data <- surv_data
 
@@ -172,7 +172,7 @@ summary(cbind(SE_matrix, surv_data$Standard.Error))
 
 # Getting the best non-transformed SE and comparing those to the observed SE's
 SE_vec <- SE_matrix[cbind(seq_len(nrow(SE_matrix)), best_trans)]
-summary(cbind(SE_vec, surv_data$Standard.Error, SE_vec / surv_data$Standard.Error))
+summary(cbind(SE_vec, surv_data$Standard.Error, SE_vec / (surv_data$Standard.Error + eps)))
 
 # Changing surveys where confidence intervals are available and the SE is not
 # to the estimated SE.

@@ -1,71 +1,80 @@
-
 # Preparing Covariates
 
-This folder contains the code used to create the multiply imputed
-datasets for the socio-demographic index (SDI) and health system access
-(MCI) covariates, which were obtained from the Institute of Health
-Metrics and Evaluation (IHME). SDI is a summary measure that identifies
-where countries or other geographic areas sit on the spectrum of
-development. Expressed on a scale of 0 to 1, SDI is a composite average
-of the rankings of the incomes per capita, average educational
-attainment, and fertility rates of all areas in the Global Burden of
-Disease study. SDI and MCI data are missing for some countries and are
-available up to 2022. Countries with missing data and values for 2023
-(for all countries) are imputed 20 times.
+This folder builds the country-by-year covariate data used in the model
+and multiply imputes the missing values (20 imputations). It has two
+Quarto documents, run in order. Rendering each one also writes an HTML
+report next to it (`*.html`, not tracked in git).
 
-## Data Sources
+| File | Input | Output (in `Data/IHME_covs/`) |
+|----|----|----|
+| `01 - Covariate Cleaning.qmd` | raw covariate sources (below) | `FPI_GDP_IHMESHOCK_WPP_SDI.csv` (plus `FPI_GDP_IHMESHOCK.csv` and the `country_crosswalk*.csv` merge checks) |
+| `02 - Imputation.qmd` | `FPI_GDP_IHMESHOCK_WPP_SDI.csv`, `Tidy_World_Devel_Indic.rds`, the JME raw files (country list) | `Multiple_Imputed_Oct2026.rds`, `Single_Impute_Oct2026.rds`, `Imputation_Oct2026.RData` |
 
-The following data sources are used and can be found in the
-`Data/IHME_covs` folder:
+```bash
+quarto render "1 - Preparing Covariates/01 - Covariate Cleaning.qmd"
+quarto render "1 - Preparing Covariates/02 - Imputation.qmd"
+```
 
-- **GBD 2022 MCI and SDI.csv**: MCI and SDI covariate information from
-  IHME.
-- **API_NY.GDP.MKTP.CD_DS2_en_csv_v2_4701247.csv**: Gross Domestic Product by country and year (obtained from https://data.worldbank.org/indicator/NY.GDP.MKTP.CD). 
-- **WPP2022_Demographic_Indicators_Medium.csv**: Additional demographic indicators (obtained from https://population.un.org/wpp/Download/Archive/CSV/).
-- **Tidy_World_Devel_Indic.rds**: Used as an intermediate merging dataset. Not a data source.
+Both documents set their own working directory (`01` works inside
+`Data/IHME_covs`, `02` at the repository root), so no `wd` needs to be
+edited. `02 - Imputation.qmd` runs `mice` in parallel with forked
+processes (macOS/Linux). Setting the environment variable `IMP_B` to a
+small number (e.g. `IMP_B=2`) gives a quick test run.
 
-## Imputation Process
+## Covariates
 
-The `Imputation of IHME covariate data_multiple_impute.R` script is
-structured as follows:
+| Variable | Description | Source file | Observed years |
+|----|----|----|----|
+| `SDI` | Socio-demographic index (GBD 2023) | `sdi_gbd_2023.csv` | through 2023 |
+| `war_terror` | IHME war and terrorism mortality covariate (GBD 2023) | `IHME_GBD_2023_COV_1980_2023_MX_WARTERROR_10YEARS_Y2025M01D08.xlsx` | through 2023 |
+| `shock` | IHME shock mortality covariate (GBD 2023) | `IHME_GBD_2023_COV_1980_2023_MX_SHOCK_LAST_10YEARS_Y2025M01D08.xlsx` | through 2023 |
+| `log_gdp_pc` / `gdp_pc` | GDP per capita, current US$ (World Bank `NY.GDP.PCAP.CD`); imputed on the log scale | `API_NY.GDP.PCAP.CD_DS2_en_csv_v2_468810.csv` | through 2025 |
+| `gdp` | GDP per capita growth, annual % (World Bank `NY.GDP.PCAP.KD.ZG`); predictor in the imputation only, not imputed | `API_NY.GDP.PCAP.KD.ZG_DS2_en_excel_v2_51.xls` | |
+| `fpi_avg` | FAO food consumer price index, yearly average (`fpi_prev5yr_avg`, `fpi_anom` are derived from it) | `ConsumerPriceIndices_E_All_Data.csv`, `ConsumerPriceIndices_E_All_Data_(Normalized).csv` | 2001-2026 |
+| `dpt_imm` | DPT immunization, % of children 12-23 months (World Bank `SH.IMM.IDPT`) | `Immun_skilled_WB_data_Oct26.csv` | through 2024 |
+| WPP indicators | Population density, median age, CBR, TFR, births 15-19, CDR, life expectancy, IMR, Q5 (UN WPP 2024); predictors in the imputation only | `WPP2024_Demographic_Country_Indicators_Medium.csv` | |
 
-1.  **Read in and Merge Data** (lines 11 - 71):
+Linking files: `Country_connectors.xlsx` (country names and codes across
+sources) and `GBD_2021_GBD_LOCATION_HIERARCHY_Y2024M05D16.xlsx` (GBD
+location ids). The IHME files are joined to the location hierarchy on
+`location_id` only, because some country names in the IHME files have
+broken encoding.
 
-    - This section involves reading the various data files and merging
-      them to create a comprehensive dataset.
+MCI (used in earlier rounds) is no longer part of the covariate data.
+Of these covariates, the October 2026 Wasting and Severe Wasting models
+use `SDI`, `war_terror` and (one Wasting model) `fpi_avg`; the others are
+available for model comparison or used as predictors in the imputation.
 
-2.  **Imputation to Create Country-Level Means by Imputation** (lines
-    74 - 100):
+## Imputation method (`02 - Imputation.qmd`)
 
-    - Imputation is performed to create country-level means for the
-      missing data.
+Each variable is imputed on a scale where it is roughly symmetric
+(`SDI`: identity, bounded to [0.001, 1]; `shock`, `war_terror`: log;
+`fpi_avg`: asinh; `log_gdp_pc`: log; `dpt_imm`: logit of the
+percentage). For each variable:
 
-3.  **Perform Imputation on Mean Centered Data** (lines 101 - 169):
+1. **Country-level means.** Impute the variable together with GDP and
+   the WPP indicators with `mice`, and compute each country's mean over
+   the observed years in every imputation.
+2. **Mean-centered imputation.** Center the variable by country, reshape
+   to wide format (one column per year), impute again with `mice`; the
+   imputed value is the country mean plus the centered value.
+3. **Years after the last observed year.** Fit the penalized
+   longitudinal model (`cmnpe()` from `Utils/Programs_Oct_2026.R`) to the
+   recent trend and draw the future values (through `last_year = 2026`)
+   from its predictive distribution. Skipped for `fpi_avg`.
 
-    - This section performs the imputation on the country mean centered
-      data. The data is then back transformed, providing the imputed
-      values up to 2022.
+Observed values are always kept. The single-imputation file is the
+average over the imputations of each numeric variable and is used for
+model comparison and exploratory analysis.
 
-4.  **Perform Imputation for 2023-2025 for All Countries** (lines 172 - 352):
+### Settings (top of `02 - Imputation.qmd`)
 
-    - Since there are no observations after 2022, a semi-parametric
-      longitudinal model is used to estimate the trend for each imputed
-      dataset. The 2023-2025 values are then randomly sampled from the
-      estimated predictive distribution of the outcome (SDI or MCI) for
-      each imputed dataset.
-
-5.  **Merge Data and Create Final Variables** (lines 353 - 450):
-
-    - The final step involves merging the imputed data and creating the
-      necessary final variables for analysis.
-
-## Usage
-
-To run the imputation process, change `wd` so that the working drive
-will be at the folder that contains the *“1 - Preparing Covariates”*
-folder. Then execute the
-`Imputation of IHME covariate data_multiple_impute.R` script. Ensure
-that all data files are correctly placed in the `Data/IHME_covs` folder.
+- `last_year`: last year imputed (2026).
+- `jme_year`: year folder of the JME raw data used for the country list.
+- `out_label`: appended to the output names (`"Oct2026"`). It must match
+  `imputed_label` in `2 - Preparing Primary Data/3 - Merging
+  Survey_Covariate_Data.R`.
+- `B` (20 imputations), `seed_base`.
 
 ## Contact
 
