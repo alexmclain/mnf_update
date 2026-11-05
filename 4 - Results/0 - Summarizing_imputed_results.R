@@ -4,28 +4,33 @@ library(this.path)
 wd <- dirname(this.path::here())
 print(wd)
 setwd(wd)
-source("Utils/Programs_Feb_2020.R")
+source("Utils/Programs_Oct_2026.R")
 
 library(tidyverse)
 
-marker <- as.character(commandArgs(trailingOnly = TRUE))
-if (length(marker) != 1) {
-  stop("Expected exactly one marker argument.")
+# Usage: Rscript "4 - Results/0 - Summarizing_imputed_results.R" <marker> [model]
+#   model: model tag used in 2 - Analysis_MI.R (e.g. "fpi"); omitted = default model.
+args <- as.character(commandArgs(trailingOnly = TRUE))
+if (!length(args) %in% 1:2) {
+  stop("Expected a marker argument and an optional model tag.")
 }
+marker <- args[1]
+model_tag <- if (length(args) == 2) args[2] else ""
 
-month <- "Feb" #Month Key to name file
+month <- "Oct" #Month Key to name file
 year <- "2026" #Year Key to name file
 
-month_o <- "Feb" #Month Key to find data
+month_o <- "Oct" #Month Key to find data
 year_o <- "2026"#Year Key to find data
-marker_f <- paste0("")
+marker_f <- model_tag
 
 date <- paste(marker_f,month,year) #for appending filename
 
 
 path = paste0("Data/Analysis files/",marker,"/")
 
-estimation_path <- paste0(path,"/Mi_files/","Estimation ",marker,"",marker_f,".rds")
+mi_name <- paste0(marker, if (model_tag != "") paste0("_", model_tag))
+estimation_path <- paste0(path,"/Mi_files/","Estimation ",mi_name,".rds")
 if (!file.exists(estimation_path)) {
   stop("Missing Estimation file: ", estimation_path)
 }
@@ -43,7 +48,7 @@ Var_mean_mat <- NULL
 Var_pred_mat <- NULL
 B <- length(boot_vals)
 for(j in boot_vals){
-  plot_path <- paste0(path,"/Mi_files/","/Plot data for ",marker,"",marker_f," imputation ",j,".rds")
+  plot_path <- paste0(path,"/Mi_files/","/Plot data for ",mi_name," imputation ",j,".rds")
   if (!file.exists(plot_path)) {
     stop("Missing plot data file: ", plot_path)
   }

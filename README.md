@@ -1,86 +1,124 @@
+# Global Estimates of Child Malnutrition (JME)
 
-# Global Health Estimates of Stunting and Overweight
+This repository contains the R code used to produce the country-level
+model-based estimates for the UNICEF-WHO-World Bank Joint Child
+Malnutrition Estimates (JME). The current round (October 2026) produces
+estimates of **Wasting** and **Severe Wasting**; the same pipeline has
+been used in earlier rounds for Stunting, Overweight and Severe
+Overweight.
 
-This repository contains all the R code used to produce the Global
-Health Estimates of Stunting and Overweight, as developed by the
-UNICEF-WHO-World Bank Joint Child Malnutrition working group.
+The model is a heterogeneous penalized longitudinal mixed model
+(McLain et al. 2019), fitted separately to each of 20 multiply imputed
+covariate datasets and pooled with Rubin's rules. See also Saraswati et
+al. (2022) and the editorial by Finaret (2022).
 
-## Overview
+## Pipeline
 
-The R scripts in this repository are organized into several folders,
-each serving a specific purpose in the data processing and modeling
-workflow. Each folder contains a README file with more details about its
-contents and specific instructions.
+The numbered folders are run in order. Each stage reads the previous
+stage's output from `Data/`. Every folder has its own README with the
+arguments, inputs and outputs of each script.
 
-To understand the technical details of the modeling procedure and the
-methods used to estimate confidence and prediction intervals, please
-refer to:
+| Stage | Folder / script | What it does | Main output |
+|----|----|----|----|
+| 0 | `Data/JME/<year>/Raw/Initial_cleaning.R` | Builds the JME survey input files from the UNICEF SDMX and CMRS extracts | `JME_Country_Level_Input_<marker>.xlsx` |
+| 1 | `1 - Preparing Covariates` | Cleans and merges the covariates (SDI, war/terror, shock, GDP, food prices, DPT, WPP) and multiply imputes them | `Data/IHME_covs/Multiple_Imputed_Oct2026.rds`, `Single_Impute_Oct2026.rds` |
+| 2 | `2 - Preparing Primary Data` | Imputes missing survey SEs, adjusts non-standard age ranges, merges surveys with covariates and regions, sex cross-walk and annual rows | `Data/Merged/<year>/<marker>_<month>_final_*.rds` |
+| 3 | `3 - Model` | Exploratory plots, hold-out model comparison, and the final multiply imputed analysis | `Data/Analysis files/<marker>/Mi_files/Estimation <marker>.rds` |
+| 4 | `4 - Results` | Pools the imputations (Rubin's rules), plots the estimates, compares runs, checks Wasting vs Severe Wasting | `Data/Analysis files/<marker>/<marker> results <tag> <month> <year>.csv`, `Figures/` |
 
-- McLain et al. (2019)
-- An application of the methods published in Saraswati et al. (2022), and
-a corresponding editorial by Finaret (2022).
+Typical run for one round (from the repository root):
 
-## Folder Structure
+```bash
+# 1. Covariates (Quarto; render both)
+quarto render "1 - Preparing Covariates/01 - Covariate Cleaning.qmd"
+quarto render "1 - Preparing Covariates/02 - Imputation.qmd"
 
-### 1. Preparing Covariates
+# 2. Primary data (once per marker)
+for m in Wasting SevereWasting; do
+  Rscript "2 - Preparing Primary Data/1 - SE_clean_and_impute.R" $m
+  Rscript "2 - Preparing Primary Data/2 - Age_range_analysis.R" $m
+  Rscript "2 - Preparing Primary Data/3 - Merging Survey_Covariate_Data.R" $m
+  Rscript "2 - Preparing Primary Data/4 - Sex_cross_walk.R" $m
+done
 
-This folder contains R code to perform multiple imputation of the
-covariate data.
+# 3. Model (optional exploration / model selection first; see 3 - Model/README.md)
+Rscript "3 - Model/2 - Analysis_MI.R" Wasting          # Wasting, model without fpi
+Rscript "3 - Model/2 - Analysis_MI.R" Wasting fpi      # Wasting, model with fpi
+Rscript "3 - Model/2 - Analysis_MI.R" SevereWasting
 
-### 2. Preparing Primary Data
+# 4. Results (pass the same model tag as in step 3)
+Rscript "4 - Results/0 - Summarizing_imputed_results.R" Wasting [fpi]
+Rscript "4 - Results/1 - Plotting_estimates.R" Wasting [max_year] [fpi]
+Rscript "4 - Results/3 - Wasting_SevereWasting_ratio.R" [fpi]
 
-This folder includes programs to:
+# Compare any two runs (e.g. Wasting without vs with fpi)
+Rscript "4 - Results/2 - Comparison Plots.R" Wasting "Oct 2026" "fpi Oct 2026" labels="No FPI,FPI"
+```
 
-- Impute missing standard error (SE) information.
-- Integration of data sources that were originally collected using different 
-(non-standard) age ranges.
-- Merge survey data with covariate data.
-- Generates approximate sex-specific prevalence rates for specific years 
-and countries (solely for use in visual figures).
+## Conventions
 
-### 3. Model
+- **Paths.** Every script finds its own location with `this.path` and
+  sets the working directory to the repository root, so it can be run
+  from anywhere. All paths in the code are relative to the root
+  (`Data/...`, `Utils/...`, `Figures/...`). The one exception is
+  `Data/JME/<year>/Raw/Initial_cleaning.R`, which must be run from its
+  own folder.
+- **Marker.** Scripts in stages 2-4 take the indicator as the first
+  command-line argument: `Wasting` or `SevereWasting` (earlier rounds also
+  used `Stunting`, `Overweight`, `SevereOverweight`). It must match the
+  folder names under `Data/Analysis files/`.
+- **Round keys.** `year` / `month` (currently `"2026"` / `"Oct"`) are set
+  at the top of each script and are used to build the input and output
+  file names. Stage 4 also has `year_o` / `month_o` (keys used to *find*
+  the data) separate from `year` / `month` (keys used to *name* the
+  output). Update them in all stage 2-4 scripts at the start of a new
+  round. The covariate label (`Oct2026`) is set in `02 - Imputation.qmd`
+  (`out_label`) and `3 - Merging Survey_Covariate_Data.R`
+  (`imputed_label`).
+- **Model tag.** `2 - Analysis_MI.R` takes an optional second argument
+  (e.g. `fpi`) that selects an alternative model and is appended to all
+  output names. Pass the same tag to the stage 4 scripts.
 
-This folder contains scripts for performing a multiply imputed analysis
-of the data for stunting or overweight.
+## Folders
 
-### 4. Results
+- **`1 - Preparing Covariates`**, **`2 - Preparing Primary Data`**,
+  **`3 - Model`**, **`4 - Results`**: the pipeline (see each README).
+- **`Utils`**: functions sourced by the pipeline.
+  - `Programs_Oct_2026.R`: core model code (`cmnpe()`, prediction and
+    output functions). Used by the imputation, model and results
+    scripts. Changes here affect every downstream stage.
+  - `Programs_Cleaning_SE.R`: helper functions for the sex cross-walk.
+- **`Data`** (not on GitHub; kept in OneDrive):
+  - `JME/<year>/Raw`, `JME/<year>/Cleaned`: survey input and cleaned
+    survey data.
+  - `IHME_covs`: raw covariate sources and the imputed covariate files.
+  - `Country/Crosswalk_Oct_2026.xlsx`: country to modelling-region
+    crosswalk.
+  - `Merged/<year>`: survey data merged with covariates.
+  - `Analysis files/<marker>`: model output, model comparison tables
+    and pooled results. `Output data dictionary.xlsx` describes the
+    columns of the results files.
+- **`Figures`** (not on GitHub): figures written by stages 3 and 4.
+- **`Write-up`**: documentation of the current round (background annex,
+  description of the model changes).
+- **`Round_changes_Oct2026.txt`**: detailed notes on what changed in the
+  October 2026 round (covariates, bug fixes, model selection, final
+  models, open issues).
 
-In this folder, you will find code for: 
+Data, model output and figures (`*.rds`, `*.csv`, `*.xls(x)`, `*.RData`,
+`Figures/`) are excluded by `.gitignore`, so a fresh clone cannot rerun
+the pipeline without the OneDrive `Data/` folder. Scripts, data and
+figures from earlier rounds that the current code no longer uses are in
+`R_programs/Archive/` on OneDrive (the November 2026 clean-up is in
+`Archive/mnf_update_cleanup_2026-11-03/`, which keeps the original
+folder structure).
 
-- Pooling imputed estimates. 
-- Plotting results. 
-- Comparing estimates with past data.
+## Software
 
-### Additional Folders
-
-- **Data**: Contains survey prevalence estimates, raw covariate data,
-  country-level classifications, and outputted analysis files.
-- **Figures**: Contains outputted figures displaying the results.
-- **Utils**: Contains various programs and functions required to run the
-  analyses.
-
-## Important Note
-
-All the programs in the folders `Preparing Primary Data`, `Model`, and
-`Results` need to be run separately for both Stunting and Overweight.
-Ensure that you read each file carefully to verify that the files are
-named and stored correctly.
-
-## References
-
-For further reading on the technical details and applications, please
-refer to the McLain et al. (2019).
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for
-details.
-
-## Contact
-
-For questions or issues, please contact the repository maintainer.
-
-## Acknowledgments
+R (with `tidyverse`, `nlme`, `mice`, `readxl`, `writexl`, `this.path`,
+`janitor`, `slider`, `doParallel`) and Quarto for the covariate step.
+The parallel code uses forked processes (`mclapply`), so it runs on
+macOS or Linux.
 
 ## References
 
@@ -114,3 +152,7 @@ Overweight Trends in the European Region from Sparse Longitudinal Data.”
 </div>
 
 </div>
+
+## Contact
+
+For questions or issues, please contact the repository maintainer.

@@ -13,7 +13,7 @@ library(dplyr)
 
 
 marker <- as.character(commandArgs(trailingOnly = TRUE))
-month <- "Feb" #for appending filename
+month <- "Oct" #for appending filename
 year <- "2026"
 
 ### If doing for multiple imputation set as TRUE, otherwise FALSE
@@ -24,17 +24,20 @@ for(multiple_imputation in multiple_imputation_vec){
   if(multiple_imputation){
     surv_data <- read_rds(paste0("Data/Merged/",year,"/",marker,"_",month,"_reg_all_multiple_impute.rds"))
     keys <- c("ISO.code","Sex", ".imp")
-    
-    surv_data %>%
-      count(across(all_of(keys))) %>%
-      filter(n < 36)
   }else{
     surv_data <- read_rds(paste0("Data/Merged/",year,"/",marker,"_",month,"_reg_all_mean_multiple.rds")) 
     keys <- c("ISO.code","Sex")
-    
-    surv_data %>%
-      count(across(all_of(keys))) %>%
-      filter(n < 36)
+  }
+  
+  ## Every country/sex(/imputation) should have a row for each year.
+  n_years <- n_distinct(surv_data$year)
+  short_keys <- surv_data %>%
+    count(across(all_of(keys))) %>%
+    filter(n < n_years)
+  if(nrow(short_keys) > 0){
+    warning(nrow(short_keys), " combinations of ", paste(keys, collapse = "/"),
+            " have fewer than ", n_years, " rows.")
+    print(short_keys)
   }
   
   # View(test %>% arrange(across(all_of(keys))) %>% select(all_of(keys), everything()))
@@ -48,10 +51,19 @@ for(multiple_imputation in multiple_imputation_vec){
       UNICEFSurveyID == 0 ~ NA_real_,
       TRUE ~ UNICEFSurveyID)
     ) %>% 
-    group_by(ISO.code, year,.imp) %>% 
+    group_by(ISO.code, year,.imp) %>%
     fill(UNICEFSurveyID,
-         .direction = "updown") 
-  
+         .direction = "updown")
+
+  ## Continuous year: sex rows added for a survey take the survey's middle_year,
+  ## rows with no survey use the integer year.
+  if(!"middle_year" %in% names(surv_data)){surv_data$middle_year <- NA_real_}
+  surv_data <- surv_data %>%
+    group_by(ISO.code, year, UNICEFSurveyID, .imp) %>%
+    fill(middle_year, .direction = "updown") %>%
+    ungroup() %>%
+    mutate(middle_year = coalesce(middle_year, as.numeric(year)))
+
   
   surv_data <- surv_data %>% 
     group_by(UNICEFSurveyID,.imp) %>% 
@@ -67,7 +79,7 @@ for(multiple_imputation in multiple_imputation_vec){
   surv_wide_one <- surv_data %>% 
     dplyr::select(
       c(ISO.code, country,  year, Sex, UNICEFSurveyID,
-        Point.Estimate, SE_val, SEV, All_africa_HIW,.imp)
+        Point.Estimate, SE_val, All_africa_HIW,.imp)
     ) %>% 
     filter(.imp <= 1) %>% 
     mutate(
@@ -80,7 +92,7 @@ for(multiple_imputation in multiple_imputation_vec){
     filter(row_number() == 1) %>%  
     pivot_wider(
       names_from = Sex, 
-      values_from = c(Point.Estimate, SE_val, SEV)
+      values_from = c(Point.Estimate, SE_val)
     ) %>% 
     mutate(
       SE_val_Female = case_when(
@@ -144,14 +156,13 @@ for(multiple_imputation in multiple_imputation_vec){
   
   #### 2. Running linear mixed models to predict missing sex groups ####
   ### Predicting for Females
+  ### Rows must be contiguous by country (and ordered the same way as the 
+  ### prediction data) for the random effects design matrix (make_Z_noPcov).
   surv_wide <-  surv_wide_B %>%  
     filter(.imp <= 1) %>% 
+    arrange(country, year, UNICEFSurveyID) %>% 
     mutate(Source = relevel(factor(All_africa_HIW), ref = "Southern Asia")) %>% 
     dplyr::select(-c(".imp"))
-  
-  surv_wide$SEV_Both[is.na(surv_wide$SEV_Both)] <- mean(surv_wide$SEV_Both[!is.na(surv_wide$SEV_Both)])
-  surv_wide$SEV_Female[is.na(surv_wide$SEV_Female)] <- mean(surv_wide$SEV_Female[!is.na(surv_wide$SEV_Female)])
-  surv_wide$SEV_Male[is.na(surv_wide$SEV_Male)] <- mean(surv_wide$SEV_Male[!is.na(surv_wide$SEV_Male)])
   
   formula <- sqrt(Point.Estimate_Female) ~ 
     sqrt(Point.Estimate_Both) 
@@ -217,8 +228,6 @@ for(multiple_imputation in multiple_imputation_vec){
   # Extracting countries that were not used in the original analysis
   cov_data_not_used <- all_data[not_in(all_data$country,data_frame$country),]
   
-  pred_all_noC <- 0
-  sigma_Y_all_noC <- 0
   if(nrow(cov_data_not_used)>0){
     # Predicting for them
     Xi.full <- cbind(model.matrix(formula_x ,data=all_data))
@@ -237,6 +246,10 @@ for(multiple_imputation in multiple_imputation_vec){
     all_data <- left_join(all_data, pred_new_data_noC)
     plot(all_data$Point.Estimate_Both, all_data$pred_all_noC)
     lines(c(0,100),c(0,100))
+  }else{
+    ## All countries were used in the fit; columns are needed for the final merge.
+    all_data$pred_all_noC <- NA_real_
+    all_data$sigma_Y_all_noC <- NA_real_
   }
   
   ### Final data for Female
@@ -370,8 +383,6 @@ for(multiple_imputation in multiple_imputation_vec){
   # Extracting countries that were not used in the original analysis
   cov_data_not_used <- all_data[not_in(all_data$country,data_frame$country),]
   
-  pred_all_noC <- 0
-  sigma_Y_all_noC <- 0
   if(nrow(cov_data_not_used)>0){
     # Predicting for them
     Xi.full <- cbind(model.matrix(formula_x,data=all_data))
@@ -390,6 +401,10 @@ for(multiple_imputation in multiple_imputation_vec){
     all_data <- merge(all_data,pred_new_data_noC,all.x=TRUE)
     plot(all_data$Point.Estimate_Both, all_data$pred_all_noC)
     lines(c(0,100),c(0,100))
+  }else{
+    ## All countries were used in the fit; columns are needed for the final merge.
+    all_data$pred_all_noC <- NA_real_
+    all_data$sigma_Y_all_noC <- NA_real_
   }
   
   surv_wide_Male <- surv_wide_B %>% 
@@ -475,7 +490,7 @@ for(multiple_imputation in multiple_imputation_vec){
       )
     ) %>% 
     dplyr::select(
-      -c(Point.Estimate_pred.x, SE_pred.x, Point.Estimate_pred.y, SE_pred.y, Region, "SEV.Z")
+      -c(Point.Estimate_pred.x, SE_pred.x, Point.Estimate_pred.y, SE_pred.y, Region)
     ) %>% 
     rename(
       Point.Estimate.Orig = PointEstimate,
@@ -483,20 +498,41 @@ for(multiple_imputation in multiple_imputation_vec){
       Point.Estimate.Imp = Point.Estimate
     ) %>% 
     dplyr::select(
-      .imp,ISO.code, country, Region, year, Sex, Point.Estimate.Orig, 
+      .imp,ISO.code, country, Region, year, middle_year, Sex, Point.Estimate.Orig,
       Point.Estimate.Imp, Point.Estimate.NS, SE_pred, SE_val, ShortSource,
-      SDI, MCI, MCI_5_yr, WB.Income.Group, SEV, UNICEFSurveyID,Standard.Error,
+      SDI, WB.Income.Group, UNICEFSurveyID,Standard.Error,
       everything()
     ) %>% 
     arrange(.imp,country,year,Sex)
-  
-  
-  
+
+  ## Annual prediction rows. Country-years with a survey only have survey rows,
+  ## which sit at the survey's middle_year. Add a row with no survey at the
+  ## integer year (country-year covariates only) so every country-year has an
+  ## annual estimate at the same time point as the years without surveys.
+  cy_cols <- c(".imp", "ISO.code", "country", "Region", "year", "Sex", "SDI",
+               "WB.Income.Group", "Country", "gdp", "log_gdp_pc", "gdp_pc",
+               "dpt_imm", "fpi_avg", "fpi_prev5yr_avg", "fpi_anom", "shock",
+               "war_terror")
+  annual_rows <- final_merge %>%
+    group_by(.imp, ISO.code, year, Sex) %>%
+    filter(all(!is.na(UNICEFSurveyID))) %>%
+    slice(1) %>%
+    ungroup() %>%
+    dplyr::select(any_of(cy_cols)) %>%
+    mutate(middle_year = as.numeric(year), check = FALSE)
+  cat("Adding", nrow(annual_rows), "annual rows for country-years with surveys\n")
+  final_merge <- bind_rows(final_merge, annual_rows) %>%
+    arrange(.imp,country,year,middle_year,Sex)
+
+
   ## Checking for duplicates
   final_merge_nodup <- final_merge %>% 
     distinct()
-  final_merge
-  final_merge_nodup
+  if(nrow(final_merge_nodup) < nrow(final_merge)){
+    warning(nrow(final_merge) - nrow(final_merge_nodup), 
+            " duplicate rows were removed before exporting.")
+  }
+  final_merge <- final_merge_nodup
   
   # Exporting
   if(multiple_imputation){

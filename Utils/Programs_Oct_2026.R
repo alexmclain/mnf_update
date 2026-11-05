@@ -1,3 +1,10 @@
+## Programs_Oct_2026.R: copy of Programs_Feb_2020.R with faster prediction.
+## Also fixes the residual variance used after fitting: varSum stores log(gamma),
+## and the prediction and output functions now use exp() of it, as lme() does.
+## Predictions and their variances are unchanged; the prediction step now
+## computes only the diagonal of the prediction covariance (unless
+## full_sig = TRUE) and builds the Z matrices without repeated cbind().
+
 require(ggplot2)
 require(nlme)
 require(splines)
@@ -188,7 +195,7 @@ model_fit <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_data=0,P
   ## Exporting the results.
   data_frame <- data.frame(Y=Y,year=year,ind=ind,country=country,SE_var=SE_var,country2=country)
   result <- list(model=fitted_model,data_frame=data_frame,Xi.matrix=Xi.matrix,DF_P=DF_P,DF_R=DF_R,B.knots=B.knots,q.order=q.order,COV = COV,P_COV = P_COV)
-  pred_results <- prediction(result,all_data,plots,boot)
+  pred_results <- prediction(result,all_data,plots,boot,full_sig=full_sig)
   
   orig_data <- pred_results$newdata[!is.na(pred_results$newdata$Y),]
   sub_2_orig_ind <- (orig_data$SE_var %in% data_w_out$SE_var & orig_data$Y %in% data_w_out$Y)
@@ -200,8 +207,12 @@ model_fit <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_data=0,P
     mis_ordered <- cbind(pred_results$newdata)
     SIGMA_T_mis_ordered <- pred_results$SIGMA_T
     SIGMA_Y_mis_ordered <- pred_results$SIGMA_Y
-    SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
-    SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    SIGMA_T <- NULL
+    SIGMA_Y <- NULL
+    if(full_sig){
+      SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+      SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    }
     ordered <- mis_ordered[order(mis_ordered$country,mis_ordered$year),]
     COV_beta_b <- diag(pred_results$COV_beta_b)
     # calculate sd's and %-tiles to get CI's and PI's
@@ -242,7 +253,7 @@ model_fit <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_data=0,P
 
 not_in <- function (x, table) is.na(match(x, table, nomatch=NA_integer_))
 
-prediction <- function(result,newdata,plots=TRUE,boot){
+prediction <- function(result,newdata,plots=TRUE,boot,full_sig=FALSE){
   ##This function will predict for the original and new data.  Also,
   # it will give plots, and save plots for the original and new data.
   ##ARGUMENTS:
@@ -311,7 +322,7 @@ prediction <- function(result,newdata,plots=TRUE,boot){
     # Setting the SE_var to the median value
     SE_val <- median(data_frame$SE_var)
     # Predicting the mean and variance for each new observation.
-    pred_mat_new <- pred_fun(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S)
+    pred_mat_new <- pred_fun(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S,full_sig=full_sig)
     
     cov_data_all <- rbind(cov_data_used_only)
     X_all <- as.matrix(X)
@@ -321,8 +332,8 @@ prediction <- function(result,newdata,plots=TRUE,boot){
     pred_all  <- pred_mat_new$mu_T
     pred_all_fixed  <- pred_mat_new$mu_F
     pred_all_fixpen  <- pred_mat_new$mu_RF
-    sigma_all <- diag(pred_mat_new$sigma_T)
-    sigma_Y_all <- diag(pred_mat_new$sigma_Y)
+    sigma_all <- pred_mat_new$sigma_T_diag
+    sigma_Y_all <- pred_mat_new$sigma_Y_diag
     which_pred<- rep(1,length(pred_mat_new$mu_T))
     COV_beta_b <- pred_mat_new$S
     SIGMA_T <- pred_mat_new$sigma_T
@@ -352,7 +363,7 @@ prediction <- function(result,newdata,plots=TRUE,boot){
         fixed_b <- b[fixed_col]
         fixed_S <- S[fixed_col,fixed_col]
         N2      <- length(unique(cov_data_not_used$country))
-        pred_mat_nob <- pred_fun_nob(X_NU,Z_NU,Y=0,fitted_model,N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S)
+        pred_mat_nob <- pred_fun_nob(X_NU,Z_NU,Y=0,fitted_model,N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S,full_sig=full_sig)
         
         cov_data_all <- rbind(cov_data_used_only,cov_data_not_used)
         row.names(cov_data_all) <- NULL
@@ -360,10 +371,12 @@ prediction <- function(result,newdata,plots=TRUE,boot){
         pred_all  <- c(pred_mat_new$mu_T,pred_mat_nob$mu_T)
         pred_all_fixed   <- c(pred_mat_new$mu_F,pred_mat_nob$mu_F)
         pred_all_fixpen  <- c(pred_mat_new$mu_RF,pred_mat_nob$mu_T)
-        sigma_all <- c(sigma_all,diag(pred_mat_nob$sigma_T))
-        sigma_Y_all <- c(sigma_Y_all,diag(pred_mat_nob$sigma_Y))
-        SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
-        SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        sigma_all <- c(sigma_all,pred_mat_nob$sigma_T_diag)
+        sigma_Y_all <- c(sigma_Y_all,pred_mat_nob$sigma_Y_diag)
+        if(full_sig){
+          SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
+          SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        }
       }
     }
     
@@ -386,7 +399,7 @@ prediction <- function(result,newdata,plots=TRUE,boot){
 }
 
 
-pred_fun <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE){  
+pred_fun <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE,full_sig=TRUE){  
   ## This function predicts the EBLUPs, predicted 
   # values and their variances for a particular X 
   # and Z design matrices.
@@ -402,10 +415,15 @@ pred_fun <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE){
   
   # Export variance components from the fitted model.
   sigma2 <- fitted_model$sigma^2
-  gamma <- c(coef(fitted_model$modelStruct$varStruct))
+  ## varSum stores log(gamma): Var = sigma2*(1 + exp(coef)*SE_var^2)
+  gamma <- exp(c(coef(fitted_model$modelStruct$varStruct)))
   
   C <- as.matrix(cbind(X,Z))
-  R <- sigma2*(1 + gamma*SE_var^2)*diag(dim(Z)[1])
+  ## R is diagonal. The full n x n R is only built for the fitting data
+  ## (it is inverted there) or when the full covariance is requested.
+  r_diag <- sigma2*(1 + gamma*SE_var^2)*rep(1, dim(Z)[1])
+  R <- NULL
+  if(length(full_b)==1 | full_sig){R <- diag(r_diag, nrow = length(r_diag))}
   df <- NULL
   if(length(full_b)==1){
     # Construct the block diagonal covariance matrix of the random effects.  
@@ -498,17 +516,26 @@ pred_fun <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE){
   num <- (dim(X)[2]) + dim(as.matrix(fitted_model$modelStruct$reStruct$ind))[2] + u2_dim
   mu_RF <- C[,1:num]%*%full_b[1:num] #fixed with penalized coefficients
   mu_T <- C%*%full_b
-  sigma_T <- C%*%S%*%t(C)
-  sigma_Y <- R+sigma_T 
+  ## Only the diagonals (prediction variances) are used unless full_sig = TRUE;
+  ## the full n x n matrices dominate the run time when n is large.
+  CS <- as.matrix(C%*%S)
+  sigma_T_diag <- rowSums(CS*C)
+  sigma_Y_diag <- r_diag + sigma_T_diag
+  sigma_T <- NULL
+  sigma_Y <- NULL
+  if(full_sig){
+    sigma_T <- CS%*%t(C)
+    sigma_Y <- R+sigma_T
+  }
   
   
   # Export the mean, covariance matrix, and random effects 
-  preds <- list(mu_T=mu_T,mu_F=mu_F,mu_RF=mu_RF,sigma_T=sigma_T,sigma_Y=sigma_Y,b=full_b,D=D,S=S,df=df)
+  preds <- list(mu_T=mu_T,mu_F=mu_F,mu_RF=mu_RF,sigma_T=sigma_T,sigma_Y=sigma_Y,sigma_T_diag=sigma_T_diag,sigma_Y_diag=sigma_Y_diag,b=full_b,D=D,S=S,df=df)
   return(preds)
 }
 
 
-pred_fun_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,fixed_S=0){  
+pred_fun_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,fixed_S=0,full_sig=TRUE){  
   
   ## This function predicts the EBLUPs, predicted 
   # values and their variances for a particular X 
@@ -527,7 +554,8 @@ pred_fun_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,fixed_S=
   
   # Calculate the marginal covariance, fixed effect mean, and random effecs.
   sigma2 <- fitted_model$sigma^2
-  gamma <- c(coef(fitted_model$modelStruct$varStruct))
+  ## varSum stores log(gamma): Var = sigma2*(1 + exp(coef)*SE_var^2)
+  gamma <- exp(c(coef(fitted_model$modelStruct$varStruct)))
   
   # Construct the block diagonal covariance matrix of the random effects.  
   b_var <- as.matrix(fitted_model$modelStruct$reStruct$country)*sigma2
@@ -539,16 +567,23 @@ pred_fun_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,fixed_S=
   Z_pen <- Z_NU[,(1:(length(fixed_b)-dim(X_NU)[2]))]
   Z_ran <- Z_NU[,-(1:(length(fixed_b)-dim(X_NU)[2]))]
   C <- as.matrix(cbind(X_NU,Z_pen))
-  R <- sigma2*(1 + gamma*SE_val^2)*diag(dim(Z_NU)[1])
+  r_diag <- sigma2*(1 + gamma*SE_val^2)*rep(1, dim(Z_NU)[1])
   
   
   mu_F    <- as.matrix(X_NU)%*%fixed_b[1:(dim(X_NU)[2])]
   mu_T    <- C%*%fixed_b
-  sigma_T <- Z_ran%*%D%*%t(Z_ran)+C%*%fixed_S%*%t(C)
-  sigma_Y <- R+sigma_T 
+  ## Only the diagonals are used unless full_sig = TRUE (see pred_fun).
+  sigma_T_diag <- rowSums(as.matrix(Z_ran%*%D)*Z_ran) + rowSums(as.matrix(C%*%fixed_S)*C)
+  sigma_Y_diag <- r_diag + sigma_T_diag
+  sigma_T <- NULL
+  sigma_Y <- NULL
+  if(full_sig){
+    sigma_T <- Z_ran%*%D%*%t(Z_ran)+C%*%fixed_S%*%t(C)
+    sigma_Y <- diag(r_diag, nrow = length(r_diag))+sigma_T
+  }
   
   # Export the mean, covariance matrix, and random effects 
-  preds <- list(mu_T=mu_T,mu_F=mu_F,sigma_T=sigma_T,sigma_Y=sigma_Y)
+  preds <- list(mu_T=mu_T,mu_F=mu_F,sigma_T=sigma_T,sigma_Y=sigma_Y,sigma_T_diag=sigma_T_diag,sigma_Y_diag=sigma_Y_diag)
   return(preds)
 }
 
@@ -582,19 +617,17 @@ make_Z <- function(newdata,data_frame,P_COV,DF_P,DF_R,B.knots,q.order){
   ## Creating the Z matrix.
   Z_u <- model.matrix(~0 + all_spline_pred + P_COV[,-1]:all_spline_pred)
   Z_u2<- model.matrix(~0 + P_COV)
-  Z_b <- NULL
-  Z_l <- NULL
+  ## Country blocks of Z (filled in place; same columns as cbind-ing per country)
   unq_cnt <- unique(new_country)
+  n_l <- ncol(rand_spline_pred)
+  Z_b <- matrix(0,nrow(rand_spline_pred),1*length(unq_cnt))
+  Z_l <- matrix(0,nrow(rand_spline_pred),n_l*length(unq_cnt))
   count <- 1
   for(k in 1:length(unq_cnt)){
-    mat1 <- matrix(0,dim(rand_spline_pred)[1],1)
-    mat2 <- matrix(0,dim(rand_spline_pred)[1],dim(rand_spline_pred)[2])
     ni <- length(new_country[new_country==unq_cnt[k]])
     count2 <- count + ni -1
-    mat1[count:count2,] <- cbind(rep(1,ni))
-    mat2[count:count2,] <- rand_spline_pred[count:count2,]
-    Z_b <- cbind(Z_b,mat1)
-    Z_l <- cbind(Z_l,mat2)
+    Z_b[count:count2,k] <- 1
+    Z_l[count:count2,(k-1)*n_l + 1:n_l] <- rand_spline_pred[count:count2,]
     count <- count2+1  
   }
   Z <- cbind(Z_u,Z_u2,Z_b,Z_l)
@@ -700,14 +733,18 @@ model_fit_noPcov <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_d
   data_frame <- data.frame(Y=Y,year=year,ind=ind,country=country,SE_var=SE_var,country2=country)
   result <- list(model=fitted_model,data_frame=data_frame,Xi.matrix=Xi.matrix,DF_P=DF_P,DF_R=DF_R,B.knots=B.knots,q.order=q.order,COV = COV)
   
-  pred_results <- prediction_noPcov(result,all_data,plots,boot)
+  pred_results <- prediction_noPcov(result,all_data,plots,boot,full_sig=full_sig)
   df <- pred_results$df
   if(!boot){
     mis_ordered <- cbind(pred_results$newdata)
     SIGMA_T_mis_ordered <- pred_results$SIGMA_T
     SIGMA_Y_mis_ordered <- pred_results$SIGMA_Y
-    SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
-    SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    SIGMA_T <- NULL
+    SIGMA_Y <- NULL
+    if(full_sig){
+      SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+      SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    }
     ordered <- mis_ordered[order(mis_ordered$country,mis_ordered$year),]
     COV_beta_b <- diag(pred_results$COV_beta_b)
     # calculate sd's and %-tiles to get CI's and PI's
@@ -746,7 +783,7 @@ model_fit_noPcov <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_d
 }  
 
 
-prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TRUE){
+prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TRUE,full_sig=FALSE){
   ##This function will predict for the original and new data.  Also,
   # it will give plots, and save plots for the original and new data.
   ##ARGUMENTS:
@@ -810,7 +847,7 @@ prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TR
     SE_val <- median(data_frame$SE_var,na.rm = TRUE)
     
     # Predicting the mean and variance for each new observation.
-    pred_mat_new <- pred_fun_noPcov(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S)
+    pred_mat_new <- pred_fun_noPcov(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S,full_sig=full_sig)
     
     cov_data_all <- rbind(cov_data_used_only)
     X_all <- as.matrix(X)
@@ -820,8 +857,8 @@ prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TR
     pred_all  <- pred_mat_new$mu_T
     pred_all_fixed  <- pred_mat_new$mu_F
     pred_all_fixpen  <- pred_mat_new$mu_RF
-    sigma_all <- diag(pred_mat_new$sigma_T)
-    sigma_Y_all <- diag(pred_mat_new$sigma_Y)
+    sigma_all <- pred_mat_new$sigma_T_diag
+    sigma_Y_all <- pred_mat_new$sigma_Y_diag
     SIGMA_T=pred_mat_new$sigma_T
     SIGMA_Y=pred_mat_new$sigma_Y
     which_pred<- rep(1,length(pred_mat_new$mu_T))
@@ -845,7 +882,7 @@ prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TR
         fixed_b <- b[1:(dim(X_NU)[2]+length(DF_P)+3 - q.order)]
         fixed_S <- S[1:(dim(X_NU)[2]+length(DF_P)+3 - q.order),1:(dim(X_NU)[2]+length(DF_P)+3 - q.order)]
         N2      <- length(unique(cov_data_not_used$country))
-        pred_mat_nob <- pred_fun_noPcov_nob(X_NU,Z_NU,Y=0,fitted_model,N=N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S)
+        pred_mat_nob <- pred_fun_noPcov_nob(X_NU,Z_NU,Y=0,fitted_model,N=N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S,full_sig=full_sig)
         
         cov_data_all <- rbind(cov_data_used_only,cov_data_not_used)
         row.names(cov_data_all) <- NULL
@@ -853,10 +890,12 @@ prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TR
         pred_all  <- c(pred_mat_new$mu_T,pred_mat_nob$mu_T)
         pred_all_fixed   <- c(pred_mat_new$mu_F,pred_mat_nob$mu_F)
         pred_all_fixpen  <- c(pred_mat_new$mu_RF,pred_mat_nob$mu_T)
-        sigma_all <- c(sigma_all,diag(pred_mat_nob$sigma_T))
-        sigma_Y_all <- c(sigma_Y_all,diag(pred_mat_nob$sigma_Y))
-        SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
-        SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        sigma_all <- c(sigma_all,pred_mat_nob$sigma_T_diag)
+        sigma_Y_all <- c(sigma_Y_all,pred_mat_nob$sigma_Y_diag)
+        if(full_sig){
+          SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
+          SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        }
       }
     }
     
@@ -880,7 +919,7 @@ prediction_noPcov <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TR
 
 
 
-pred_fun_noPcov <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE){  
+pred_fun_noPcov <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRUE,full_sig=TRUE){  
   ## This function predicts the EBLUPs, predicted 
   # values and their variances for a particular X 
   # and Z design matrices.
@@ -897,13 +936,18 @@ pred_fun_noPcov <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRU
   # Export variance components from the fitted model.
   
   # Calculate the marginal covariance, fixed effect mean, and random effecs.
-  gamma <- c(coef(fitted_model$modelStruct$varStruct))
+  ## varSum stores log(gamma): Var = sigma2*(1 + exp(coef)*SE_var^2)
+  gamma <- exp(c(coef(fitted_model$modelStruct$varStruct)))
   sigma2 <- fitted_model$sigma^2
   
   
   
   C <- as.matrix(cbind(X,Z))
-  R <- sigma2*(1 + gamma*SE_var^2)*diag(dim(Z)[1])
+  ## R is diagonal. The full n x n R is only built for the fitting data
+  ## (it is inverted there) or when the full covariance is requested.
+  r_diag <- sigma2*(1 + gamma*SE_var^2)*rep(1, dim(Z)[1])
+  R <- NULL
+  if(length(full_b)==1 | full_sig){R <- diag(r_diag, nrow = length(r_diag))}
   df<- NULL
   if(length(full_b)==1){
     u_var <- as.matrix(fitted_model$modelStruct$reStruct$ind)*sigma2
@@ -987,16 +1031,25 @@ pred_fun_noPcov <- function(X,Z,Y,fitted_model,N,SE_var=1,full_b=0,S=0,EBLUP=TRU
   num <- (dim(X)[2]) + dim(as.matrix(fitted_model$modelStruct$reStruct$ind))[2]
   mu_RF <- C[,1:num]%*%full_b[1:num]
   mu_T <- C%*%full_b
-  sigma_T <- C%*%S%*%t(C)
-  sigma_Y <- R+sigma_T 
+  ## Only the diagonals (prediction variances) are used unless full_sig = TRUE;
+  ## the full n x n matrices dominate the run time when n is large.
+  CS <- as.matrix(C%*%S)
+  sigma_T_diag <- rowSums(CS*C)
+  sigma_Y_diag <- r_diag + sigma_T_diag
+  sigma_T <- NULL
+  sigma_Y <- NULL
+  if(full_sig){
+    sigma_T <- CS%*%t(C)
+    sigma_Y <- R+sigma_T
+  }
   
   # Export the mean, covariance matrix, and random effects 
-  preds <- list(mu_T=mu_T,mu_F=mu_F,mu_RF=mu_RF,sigma_T=sigma_T,sigma_Y=sigma_Y,b=full_b,D=D,S=S,df=df)
+  preds <- list(mu_T=mu_T,mu_F=mu_F,mu_RF=mu_RF,sigma_T=sigma_T,sigma_Y=sigma_Y,sigma_T_diag=sigma_T_diag,sigma_Y_diag=sigma_Y_diag,b=full_b,D=D,S=S,df=df)
   return(preds)
 }
 
 
-pred_fun_noPcov_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,fixed_S=0){  
+pred_fun_noPcov_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,fixed_S=0,full_sig=TRUE){  
   
   ## This function predicts the EBLUPs, predicted 
   # values and their variances for a particular X 
@@ -1012,13 +1065,14 @@ pred_fun_noPcov_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,f
   # Export variance components from the fitted model.
   
   # Calculate the marginal covariance, fixed effect mean, and random effecs.
-  gamma <- c(coef(fitted_model$modelStruct$varStruct))
+  ## varSum stores log(gamma): Var = sigma2*(1 + exp(coef)*SE_var^2)
+  gamma <- exp(c(coef(fitted_model$modelStruct$varStruct)))
   sigma2 <- fitted_model$sigma^2
   
   Z_pen <- Z_NU[,(1:(length(fixed_b)-dim(X_NU)[2]))]
   Z_ran <- Z_NU[,-(1:(length(fixed_b)-dim(X_NU)[2]))]
   C <- as.matrix(cbind(X_NU,Z_pen))
-  R <- sigma2*(1 + gamma*SE_val^2)*diag(dim(Z_NU)[1])
+  r_diag <- sigma2*(1 + gamma*SE_val^2)*rep(1, dim(Z_NU)[1])
   b_var <- as.matrix(fitted_model$modelStruct$reStruct$country)*sigma2
   l_var <- as.matrix(fitted_model$modelStruct$reStruct$country2)*sigma2
   
@@ -1031,11 +1085,18 @@ pred_fun_noPcov_nob <- function(X_NU,Z_NU,Y,fitted_model,N2,SE_val=1,fixed_b=0,f
   
   mu_F <- as.matrix(X_NU)%*%fixed_b[1:(dim(X_NU)[2])]
   mu_T <- C%*%fixed_b
-  sigma_T <- Z_ran%*%D%*%t(Z_ran)+C%*%fixed_S%*%t(C)
-  sigma_Y <- R+sigma_T 
+  ## Only the diagonals are used unless full_sig = TRUE (see pred_fun).
+  sigma_T_diag <- rowSums(as.matrix(Z_ran%*%D)*Z_ran) + rowSums(as.matrix(C%*%fixed_S)*C)
+  sigma_Y_diag <- r_diag + sigma_T_diag
+  sigma_T <- NULL
+  sigma_Y <- NULL
+  if(full_sig){
+    sigma_T <- Z_ran%*%D%*%t(Z_ran)+C%*%fixed_S%*%t(C)
+    sigma_Y <- diag(r_diag, nrow = length(r_diag))+sigma_T
+  }
   
   # Export the mean, covariance matrix, and random effects 
-  preds <- list(mu_T=mu_T,mu_F=mu_F,sigma_T=sigma_T,sigma_Y=sigma_Y)
+  preds <- list(mu_T=mu_T,mu_F=mu_F,sigma_T=sigma_T,sigma_Y=sigma_Y,sigma_T_diag=sigma_T_diag,sigma_Y_diag=sigma_Y_diag)
   return(preds)
 }
 
@@ -1066,19 +1127,17 @@ make_Z_noPcov <- function(all_data,data_frame,DF_P,DF_R,B.knots,q.order){
   
   ## Creating the Z matrix.
   Z_u <-all_spline_pred
-  Z_b <- NULL
-  Z_l <- NULL
+  ## Country blocks of Z (filled in place; same columns as cbind-ing per country)
   unq_cnt <- unique(new_country)
+  n_l <- ncol(rand_spline_pred)
+  Z_b <- matrix(0,nrow(rand_spline_pred),1*length(unq_cnt))
+  Z_l <- matrix(0,nrow(rand_spline_pred),n_l*length(unq_cnt))
   count <- 1
   for(k in 1:length(unq_cnt)){
-    mat1 <- matrix(0,dim(rand_spline_pred)[1],1)
-    mat2 <- matrix(0,dim(rand_spline_pred)[1],dim(rand_spline_pred)[2])
     ni <- length(new_country[new_country==unq_cnt[k]])
     count2 <- count + ni -1
-    mat1[count:count2,] <- cbind(rep(1,ni))
-    mat2[count:count2,] <- rand_spline_pred[count:count2,]
-    Z_b <- cbind(Z_b,mat1)
-    Z_l <- cbind(Z_l,mat2)
+    Z_b[count:count2,k] <- 1
+    Z_l[count:count2,(k-1)*n_l + 1:n_l] <- rand_spline_pred[count:count2,]
     count <- count2+1  
   }
   Z <- cbind(Z_u,Z_b,Z_l)
@@ -1225,15 +1284,19 @@ model_fit_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_da
   ## Exporting the results.
   data_frame <- data.frame(Y=Y,year=year,ind=ind,country=country,SE_var=SE_var,country2=country,c_year=c_year)
   result <- list(model=fitted_model,data_frame=data_frame,Xi.matrix=Xi.matrix,DF_P=DF_P,DF_R=DF_R,B.knots=B.knots,q.order=q.order,COV = COV,P_COV = P_COV)
-  pred_results <- prediction_slope(result,all_data,plots)
+  pred_results <- prediction_slope(result,all_data,plots,full_sig=full_sig)
   
   df <- pred_results$df
   plot_data <- NULL
   mis_ordered <- cbind(pred_results$newdata)
   SIGMA_T_mis_ordered <- pred_results$SIGMA_T
   SIGMA_Y_mis_ordered <- pred_results$SIGMA_Y
-  SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
-  SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+  SIGMA_T <- NULL
+  SIGMA_Y <- NULL
+  if(full_sig){
+    SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+  }
   ordered <- mis_ordered[order(mis_ordered$country,mis_ordered$year),]
   COV_beta_b <- diag(pred_results$COV_beta_b)
   # calculate sd's and %-tiles to get CI's and PI's
@@ -1274,7 +1337,7 @@ model_fit_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order,cov_da
 }  
 
 
-prediction_slope <- function(result,newdata,plots=TRUE){
+prediction_slope <- function(result,newdata,plots=TRUE,full_sig=FALSE){
   ##This function will predict for the original and new data.  Also,
   # it will give plots, and save plots for the original and new data.
   ##ARGUMENTS:
@@ -1344,7 +1407,7 @@ prediction_slope <- function(result,newdata,plots=TRUE){
     # Setting the SE_var to the median value
     SE_val <- median(data_frame$SE_var)
     # Predicting the mean and variance for each new observation.
-    pred_mat_new <- pred_fun(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S)
+    pred_mat_new <- pred_fun(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S,full_sig=full_sig)
     
     cov_data_all <- rbind(cov_data_used_only)
     X_all <- as.matrix(X)
@@ -1354,8 +1417,8 @@ prediction_slope <- function(result,newdata,plots=TRUE){
     pred_all  <- pred_mat_new$mu_T
     pred_all_fixed  <- pred_mat_new$mu_F
     pred_all_fixpen  <- pred_mat_new$mu_RF
-    sigma_all <- diag(pred_mat_new$sigma_T)
-    sigma_Y_all <- diag(pred_mat_new$sigma_Y)
+    sigma_all <- pred_mat_new$sigma_T_diag
+    sigma_Y_all <- pred_mat_new$sigma_Y_diag
     which_pred<- rep(1,length(pred_mat_new$mu_T))
     COV_beta_b <- pred_mat_new$S
     SIGMA_T <- pred_mat_new$sigma_T
@@ -1385,7 +1448,7 @@ prediction_slope <- function(result,newdata,plots=TRUE){
         fixed_b <- b[fixed_col]
         fixed_S <- S[fixed_col,fixed_col]
         N2      <- length(unique(cov_data_not_used$country))
-        pred_mat_nob <- pred_fun_nob(X_NU,Z_NU,Y=0,fitted_model,N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S)
+        pred_mat_nob <- pred_fun_nob(X_NU,Z_NU,Y=0,fitted_model,N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S,full_sig=full_sig)
         
         cov_data_all <- rbind(cov_data_used_only,cov_data_not_used)
         row.names(cov_data_all) <- NULL
@@ -1393,10 +1456,12 @@ prediction_slope <- function(result,newdata,plots=TRUE){
         pred_all  <- c(pred_mat_new$mu_T,pred_mat_nob$mu_T)
         pred_all_fixed   <- c(pred_mat_new$mu_F,pred_mat_nob$mu_F)
         pred_all_fixpen  <- c(pred_mat_new$mu_RF,pred_mat_nob$mu_T)
-        sigma_all <- c(sigma_all,diag(pred_mat_nob$sigma_T))
-        sigma_Y_all <- c(sigma_Y_all,diag(pred_mat_nob$sigma_Y))
-        SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
-        SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        sigma_all <- c(sigma_all,pred_mat_nob$sigma_T_diag)
+        sigma_Y_all <- c(sigma_Y_all,pred_mat_nob$sigma_Y_diag)
+        if(full_sig){
+          SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
+          SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        }
       }
     }
     
@@ -1449,19 +1514,17 @@ make_Z_slope <- function(newdata,data_frame,P_COV,DF_P,DF_R,B.knots,q.order){
   P_COV <- as.matrix(P_COV)
   ## Creating the Z matrix.
   Z_u <- model.matrix(~0 + all_spline_pred + P_COV[,-1]:all_spline_pred)
-  Z_b <- NULL
-  Z_l <- NULL
+  ## Country blocks of Z (filled in place; same columns as cbind-ing per country)
   unq_cnt <- unique(new_country)
+  n_l <- ncol(rand_spline_pred)
+  Z_b <- matrix(0,nrow(rand_spline_pred),1*length(unq_cnt))
+  Z_l <- matrix(0,nrow(rand_spline_pred),n_l*length(unq_cnt))
   count <- 1
   for(k in 1:length(unq_cnt)){
-    mat1 <- matrix(0,length(cov_data_used_only$year),1)
-    mat2 <- matrix(0,length(cov_data_used_only$year),dim(rand_spline_pred)[2])
     ni <- length(new_country[new_country==unq_cnt[k]])
     count2 <- count + ni -1
-    mat1[count:count2,] <- cbind(rep(1,ni))
-    mat2[count:count2,] <- rand_spline_pred[count:count2,]
-    Z_b <- cbind(Z_b,mat1)
-    Z_l <- cbind(Z_l,mat2)
+    Z_b[count:count2,k] <- 1
+    Z_l[count:count2,(k-1)*n_l + 1:n_l] <- rand_spline_pred[count:count2,]
     count <- count2+1  
   }
   Z <- cbind(Z_u,Z_b,Z_l)
@@ -1567,14 +1630,18 @@ model_fit_noPcov_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order
   data_frame <- data.frame(Y=Y,year=year,ind=ind,country=country,SE_var=SE_var,country2=country,c_year=c_year)
   result <- list(model=fitted_model,data_frame=data_frame,Xi.matrix=Xi.matrix,DF_P=DF_P,DF_R=DF_R,B.knots=B.knots,q.order=q.order,COV = COV)
   
-  pred_results <- prediction_noPcov_slope(result,all_data,plots,boot)
+  pred_results <- prediction_noPcov_slope(result,all_data,plots,boot,full_sig=full_sig)
   df <- pred_results$df
   if(!boot){
     mis_ordered <- cbind(pred_results$newdata)
     SIGMA_T_mis_ordered <- pred_results$SIGMA_T
     SIGMA_Y_mis_ordered <- pred_results$SIGMA_Y
-    SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
-    SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    SIGMA_T <- NULL
+    SIGMA_Y <- NULL
+    if(full_sig){
+      SIGMA_T <- SIGMA_T_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+      SIGMA_Y <- SIGMA_Y_mis_ordered[order(mis_ordered$country,mis_ordered$year),order(mis_ordered$country,mis_ordered$year)]
+    }
     ordered <- mis_ordered[order(mis_ordered$country,mis_ordered$year),]
     COV_beta_b <- diag(pred_results$COV_beta_b)
     # calculate sd's and %-tiles to get CI's and PI's
@@ -1613,7 +1680,7 @@ model_fit_noPcov_slope <- function(data_w_out,all_data,DF_P,DF_R,B.knots,q.order
 }  
 
 
-prediction_noPcov_slope <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TRUE){
+prediction_noPcov_slope <- function(result,all_data,plots=TRUE,boot = FALSE,EBLUP = TRUE,full_sig=FALSE){
   ##This function will predict for the original and new data.  Also,
   # it will give plots, and save plots for the original and new data.
   ##ARGUMENTS:
@@ -1676,7 +1743,7 @@ prediction_noPcov_slope <- function(result,all_data,plots=TRUE,boot = FALSE,EBLU
     SE_val <- median(data_frame$SE_var,na.rm = TRUE)
     
     # Predicting the mean and variance for each new observation.
-    pred_mat_new <- pred_fun_noPcov(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S)
+    pred_mat_new <- pred_fun_noPcov(X,Z,Y=0,fitted_model,N,SE_var=SE_val,full_b = b,S=S,full_sig=full_sig)
     
     cov_data_all <- rbind(cov_data_used_only)
     X_all <- as.matrix(X)
@@ -1686,8 +1753,8 @@ prediction_noPcov_slope <- function(result,all_data,plots=TRUE,boot = FALSE,EBLU
     pred_all  <- pred_mat_new$mu_T
     pred_all_fixed  <- pred_mat_new$mu_F
     pred_all_fixpen  <- pred_mat_new$mu_RF
-    sigma_all <- diag(pred_mat_new$sigma_T)
-    sigma_Y_all <- diag(pred_mat_new$sigma_Y)
+    sigma_all <- pred_mat_new$sigma_T_diag
+    sigma_Y_all <- pred_mat_new$sigma_Y_diag
     SIGMA_T=pred_mat_new$sigma_T
     SIGMA_Y=pred_mat_new$sigma_Y
     which_pred<- rep(1,length(pred_mat_new$mu_T))
@@ -1713,7 +1780,7 @@ prediction_noPcov_slope <- function(result,all_data,plots=TRUE,boot = FALSE,EBLU
         fixed_b <- b[fixed_col]
         fixed_S <- S[fixed_col,fixed_col]
         N2      <- length(unique(cov_data_not_used$country))
-        pred_mat_nob <- pred_fun_noPcov_nob(X_NU,Z_NU,Y=0,fitted_model,N=N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S)
+        pred_mat_nob <- pred_fun_noPcov_nob(X_NU,Z_NU,Y=0,fitted_model,N=N2,SE_val=SE_val,fixed_b = fixed_b,fixed_S=fixed_S,full_sig=full_sig)
         
         cov_data_all <- rbind(cov_data_used_only,cov_data_not_used)
         row.names(cov_data_all) <- NULL
@@ -1721,10 +1788,12 @@ prediction_noPcov_slope <- function(result,all_data,plots=TRUE,boot = FALSE,EBLU
         pred_all  <- c(pred_mat_new$mu_T,pred_mat_nob$mu_T)
         pred_all_fixed   <- c(pred_mat_new$mu_F,pred_mat_nob$mu_F)
         pred_all_fixpen  <- c(pred_mat_new$mu_RF,pred_mat_nob$mu_T)
-        sigma_all <- c(sigma_all,diag(pred_mat_nob$sigma_T))
-        sigma_Y_all <- c(sigma_Y_all,diag(pred_mat_nob$sigma_Y))
-        SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
-        SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        sigma_all <- c(sigma_all,pred_mat_nob$sigma_T_diag)
+        sigma_Y_all <- c(sigma_Y_all,pred_mat_nob$sigma_Y_diag)
+        if(full_sig){
+          SIGMA_T=blockMatrixDiagonal(SIGMA_T,pred_mat_nob$sigma_T)
+          SIGMA_Y=blockMatrixDiagonal(SIGMA_Y,pred_mat_nob$sigma_Y)
+        }
       }
     }
     
@@ -1777,19 +1846,17 @@ make_Z_noPcov_slope <- function(all_data,data_frame,DF_P,DF_R,B.knots,q.order){
   
   ## Creating the Z matrix.
   Z_u <-all_spline_pred
-  Z_b <- NULL
-  Z_l <- NULL
+  ## Country blocks of Z (filled in place; same columns as cbind-ing per country)
   unq_cnt <- unique(new_country)
+  n_l <- ncol(rand_spline_pred)
+  Z_b <- matrix(0,nrow(rand_spline_pred),2*length(unq_cnt))
+  Z_l <- matrix(0,nrow(rand_spline_pred),n_l*length(unq_cnt))
   count <- 1
   for(k in 1:length(unq_cnt)){
-    mat1 <- matrix(0,rand_spline_dim[1],2)
-    mat2 <- matrix(0,rand_spline_dim[1],rand_spline_dim[2])
     ni <- length(new_country[new_country==unq_cnt[k]])
     count2 <- count + ni -1
-    mat1[count:count2,] <- cbind(rep(1,ni),cov_data_used_only$c_year[count:count2])
-    mat2[count:count2,] <- rand_spline_pred[count:count2,]
-    Z_b <- cbind(Z_b,mat1)
-    Z_l <- cbind(Z_l,mat2)
+    Z_b[count:count2,2*(k-1) + 1:2] <- cbind(rep(1,ni),cov_data_used_only$c_year[count:count2])
+    Z_l[count:count2,(k-1)*n_l + 1:n_l] <- rand_spline_pred[count:count2,]
     count <- count2+1  
   }
   Z <- cbind(Z_u,Z_b,Z_l)
@@ -2045,8 +2112,12 @@ output_function <- function(plot_data, Estimation, data_one, marker, date,path){
   gamma <- Estimation$gamma
   sigma2 <- Estimation$sigma2
   smart_cov <- Estimation$smart_cov
-  
-  plot_data <- plot_data %>% 
+  ## plot_data$year holds the model's time variable ("year" or "middle_year");
+  ## older Estimation files have no year_var and used the integer year.
+  year_var <- if(is.null(Estimation$year_var)) "year" else Estimation$year_var
+  join_by_time <- setNames(c("country", "year", "Sex"), c("country", year_var, "Sex"))
+
+  plot_data <- plot_data %>%
     group_by(country, year, Sex) %>%
     filter(row_number()==1) %>% 
     ungroup() %>% 
@@ -2079,7 +2150,7 @@ output_function <- function(plot_data, Estimation, data_one, marker, date,path){
     ) %>% 
     select(-"SE_pred") %>% 
     arrange(country, year, Sex) %>% 
-    left_join(plot_data, relationship = "many-to-one", by = c("country", "year", "Sex"))  %>% 
+    left_join(plot_data, relationship = "many-to-one", by = join_by_time)  %>%
     mutate(
       all_SE_var = SE_val*((1/Point.Estimate.Imp) + 1/(1-Point.Estimate.Imp)), 
       all_Y = log(Point.Estimate.Imp/(1-Point.Estimate.Imp))
@@ -2113,7 +2184,7 @@ output_function <- function(plot_data, Estimation, data_one, marker, date,path){
       Prediction = exp(pred)/(1+exp(pred)),
       pred_fixed = exp(pred_fixed)/(1+exp(pred_fixed)),
       pred_fixpen = exp(pred_fixpen)/(1+exp(pred_fixpen)),
-      SE_var = sqrt(sigma2*(1 + gamma*SE_var^2))
+      SE_var = sqrt(sigma2*(1 + exp(gamma)*SE_var^2))   # Estimation$gamma is the stored log(gamma)
     ) %>% 
     mutate(
       Std.Err = Point.Estimate*(1-Point.Estimate)*(SE_var), 

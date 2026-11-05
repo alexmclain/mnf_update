@@ -1,0 +1,588 @@
+---
+title: "Covariate Imputation"
+author: "Alexander McLain"
+date: today
+format:
+  html:
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    number-sections: true
+    smooth-scroll: true
+    theme: cosmo
+    code-fold: false
+    highlight-style: github
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Overview
+
+This file multiply imputes the country-by-year covariates created in `01 - Covariate Cleaning.qmd` (`FPI_GDP_IHMESHOCK_WPP_SDI.csv`). It replaces `Imputation of IHME covariate data_multiple_impute.R`, which used the old SDI, GDP and WPP 2022 data, and uses the same general method. The covariates imputed are:
+
+| Variable | Description | Observed years |
+|----|----|----|
+| `SDI` | Socio-demographic index (GBD 2023) | through 2023 |
+| `fpi_avg` | Food price index (yearly average) | 2001 - 2026 |
+| `shock` | IHME shock mortality covariate | through 2023 |
+| `war_terror` | IHME war and terror mortality covariate | through 2023 |
+| `log_gdp_pc` | Log of GDP per capita (current US$) | through 2025 |
+| `dpt_imm` | DPT immunization, % of children 12-23 months (World Bank) | through 2024 |
+
+`fpi_prev5yr_avg` and `fpi_anom` are derived from `fpi_avg`, so they are recomputed from the imputed `fpi_avg` rather than imputed separately. `fpi_max` is not imputed (it is not used downstream). `gdp` (GDP per capita growth, %) and the WPP indicators are only used as predictors; `gdp` is carried through unimputed. GDP per capita (`gdp_pc`, US$) is imputed on the log scale (`log_gdp_pc`) and is also used as a predictor for the other variables; the output has both `log_gdp_pc` and `gdp_pc = exp(log_gdp_pc)`. `dpt_imm` is a percentage imputed on the logit scale and returned as a percentage. It is not used as a predictor for the other variables.
+
+For each variable, the steps are the same as in the old program:
+
+1.  **Country-level means.** Impute the variable (together with GDP and the WPP demographic indicators) with `mice`, and compute each country's mean over the observed years in every imputation.
+2.  **Mean-centered imputation.** Mean center the variable by country, reshape to wide format (one column per year) and impute again with `mice`. The imputed variable is the country mean plus the centered value.
+3.  **Years after the last observed year.** Fit the penalized longitudinal model (`cmnpe`) to the recent trend and draw the future values from its predictive distribution. This step is skipped if the variable is observed through the last year (`fpi_avg`).
+
+Observed values are always kept as observed. All paths are relative to the repository root.
+
+# Settings
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(mice)
+library(parallel)
+library(doParallel)
+library(slider)
+library(this.path)
+
+# knitr resets the working directory after every chunk, so root.dir is needed
+# for the whole document (see 01 - Covariate Cleaning.qmd).
+repo_dir <- dirname(this.dir())
+knitr::opts_knit$set(root.dir = repo_dir)
+setwd(repo_dir)
+source("Utils/Programs_Oct_2026.R")
+```
+
+```{r}
+first_year <- 1984   # first year of covariate data
+last_year  <- 2026   # last year to impute for
+jme_year   <- "2026" # year folder of the JME raw data (only used for the country list)
+cov_file   <- "Data/IHME_covs/FPI_GDP_IHMESHOCK_WPP_SDI.csv"  # from 01 - Covariate Cleaning.qmd
+out_label  <- "Oct2026" # appended to the output file names (the old files are not overwritten)
+
+# A year is treated as "observed" for a variable if at least this share of the
+# countries have data for it. This sets the first and last observed years.
+min_obs_share <- 0.5
+
+# Number of imputations (IMP_B can be set to a small number for a quick test run)
+B <- as.integer(Sys.getenv("IMP_B", unset = "20"))
+seed_base <- 238746
+## Settings tried, in order, if the trend model fails (see the imputation function)
+retry_grid <- expand_grid(knot_step = c(2, 3), y_scale = c(1, 10, 100, 1000, 1e4, 1e-2, 0.1, 1e5))
+
+## Number of cores: the largest divisor of B that is <= the available cores - 1.
+## This keeps n.core * n.imp.core == B (parlmice overrides m otherwise).
+max_cores <- max(1, min(B, parallel::detectCores() -2))
+n_core <- max(Filter(function(d) B %% d == 0, seq_len(max_cores)))
+n_imp_core <- B / n_core
+
+## Runs mice in parallel (forked processes, macOS/Linux): n_core runs of n_imp_core
+## imputations each, combined into one mids object with B imputations.
+## (parlmice is deprecated and does not work when called inside a function.)
+par_mice <- function(data, pred, meth, seed, maxit = 20) {
+  runs <- mclapply(
+    seq_len(n_core),
+    function(i) mice(data, m = n_imp_core, predictorMatrix = pred, method = meth,
+                     maxit = maxit, printFlag = FALSE, seed = seed + i),
+    mc.cores = n_core, mc.set.seed = FALSE
+  )
+  if (any(map_lgl(runs, \(r) inherits(r, "try-error")))) stop("mice failed in a worker.")
+  reduce(runs, ibind)
+}
+
+# WPP indicators used to predict the covariates (the same as the old program)
+wpp_vars <- c("PopDensity", "MedianAgePop", "CBR", "TFR",
+              "Births1519", "CDR", "LEx", "IMR", "Q5")
+```
+
+Each variable is imputed on a scale where it is roughly symmetric: `SDI` is not transformed (it is bounded to [0.001, 1] after imputation, and its trend is modeled on the logit scale, as before), `shock` and `war_terror` are right skewed so `log(x)` is used (the few zeros are first set to the smallest positive value divided by $\sqrt{2}$, see below), and `fpi_avg` has extreme values (hyperinflation) and negative values so `asinh` is used. GDP per capita is right skewed and positive so it is imputed as `log(gdp_pc)` (no transformation back and forth is needed for the trend model). `dpt_imm` (a percentage) is imputed on the logit scale; values of exactly 0 or 100 would not have a logit, so they are moved off the boundary in the same way as the zeros above (there are currently none: the observed range is 1 to 99).
+
+```{r}
+## Percentages (0-100) on the logit scale. Zeros and 100s are handled when the data are read in.
+logit_pct <- function(x) qlogis(x / 100)
+inv_logit_pct <- function(y) 100 * plogis(y)
+
+var_cfg <- list(
+  SDI = list(
+    col = "sdi",
+    to = identity, from = identity,       # scale used for the imputation
+    lo = 0.001, hi = 1,                   # valid range on that scale
+    to_trend = function(x) qlogis(x / 1.15),   # scale used for the trend model
+    from_trend = function(y) 1.15 * plogis(y)
+  ),
+  shock = list(
+    col = "shock",
+    to = log, from = exp,
+    lo = -Inf, hi = Inf
+  ),
+  war_terror = list(
+    col = "war_terror",
+    to = log, from = exp,
+    lo = -Inf, hi = Inf
+  ),
+  fpi_avg = list(
+    col = "fpi_avg",
+    to = asinh, from = sinh,
+    lo = -Inf, hi = Inf
+  ),
+  log_gdp_pc = list(
+    col = "log_gdp_pc",                   # log of GDP per capita (US$), made below
+    to = identity, from = identity,
+    lo = -Inf, hi = Inf
+  ),
+  dpt_imm = list(
+    col = "dpt_imm",
+    to = logit_pct, from = inv_logit_pct,
+    lo = -Inf, hi = Inf
+  )
+)
+# The trend model uses the imputation scale unless specified otherwise.
+var_cfg <- map(var_cfg, function(cfg) {
+  if (is.null(cfg$to_trend)) cfg$to_trend <- cfg$to
+  if (is.null(cfg$from_trend)) cfg$from_trend <- cfg$from
+  cfg
+})
+```
+
+# Read in and Merge Data
+
+The country list is the countries in the covariate file (those with an ISO3 code) plus any country in the JME survey data, so every survey country gets covariates.
+
+```{r}
+cov_raw <- read_csv(cov_file, show_col_types = FALSE)
+
+cov_dat <- cov_raw |>
+  filter(!is.na(country_code), year >= first_year, year <= last_year) |>
+  transmute(
+    ISO3Code = country_code,
+    location_name = coalesce(gbd_location_name, country),
+    year, sdi, gdp, gdp_pc, dpt_imm, fpi_avg, shock, war_terror,
+    TPopulation1Jan, across(all_of(wpp_vars))
+  )
+
+stopifnot(!anyDuplicated(cov_dat[, c("ISO3Code", "year")]))
+
+## Zeros cannot be log (or logit) transformed. There are few, so rather than adding a
+## constant to every value, the zeros are set to the smallest positive value divided
+## by sqrt(2). (Percentages at 100 are moved below 100 by the same rule.)
+## This applies to the observed values too, so the zeros are also replaced in the output.
+fix_zeros <- function(x, name) {
+  n0 <- sum(x <= 0, na.rm = TRUE)
+  if (n0 > 0) {
+    m <- min(x[x > 0], na.rm = TRUE)
+    message(name, ": ", n0, " zero value(s) set to ", signif(m / sqrt(2), 4))
+    x[!is.na(x) & x <= 0] <- m / sqrt(2)
+  }
+  x
+}
+fix_pct <- function(x, name) {
+  x <- fix_zeros(x, name)
+  n100 <- sum(x >= 100, na.rm = TRUE)
+  if (n100 > 0) {
+    u <- max(x[x < 100], na.rm = TRUE)
+    message(name, ": ", n100, " value(s) of 100 set to ", signif(100 - (100 - u) / sqrt(2), 4))
+    x[!is.na(x) & x >= 100] <- 100 - (100 - u) / sqrt(2)
+  }
+  x
+}
+
+cov_dat <- cov_dat |>
+  mutate(
+    shock = fix_zeros(shock, "shock"),
+    war_terror = fix_zeros(war_terror, "war_terror"),
+    dpt_imm = fix_pct(dpt_imm, "dpt_imm")
+  )
+
+## Countries in the JME survey data
+jme_files <- list.files(
+  paste0("Data/JME/", jme_year, "/Raw"),
+  pattern = "^JME_Country_Level_Input_.*\\.xlsx$", full.names = TRUE
+)
+if (length(jme_files) == 0) {
+  stop("No JME files found in Data/JME/", jme_year, "/Raw. Update `jme_year`.")
+}
+jme_countries <- map_dfr(jme_files, \(f) read_excel(f) |> distinct(ISO3Code, Country)) |>
+  distinct(ISO3Code, .keep_all = TRUE) |>
+  filter(!is.na(ISO3Code))
+
+All_countries <- full_join(
+  jme_countries,
+  cov_dat |> distinct(ISO3Code, location_name),
+  by = "ISO3Code"
+) |>
+  mutate(location_name = coalesce(location_name, Country)) |>
+  select(ISO3Code, location_name)
+
+# JME countries with no covariate data (these are imputed from the year trend only)
+setdiff(jme_countries$ISO3Code, cov_dat$ISO3Code)
+```
+
+A complete country-by-year grid is used so that every country has a row for every year.
+
+```{r}
+all_cov <- expand_grid(
+  ISO3Code = All_countries$ISO3Code,
+  year = first_year:last_year
+) |>
+  left_join(All_countries, by = "ISO3Code") |>
+  left_join(cov_dat |> select(-location_name), by = c("ISO3Code", "year")) |>
+  mutate(lpop = log(TPopulation1Jan),
+         log_gdp_pc = log(gdp_pc)) |>
+  select(ISO3Code, location_name, year, sdi, fpi_avg, shock, war_terror,
+         gdp, log_gdp_pc, dpt_imm, lpop, all_of(wpp_vars))
+
+stopifnot(!anyNA(all_cov$year), !anyDuplicated(all_cov[, c("ISO3Code", "year")]))
+
+# Number of distinct countries
+n_distinct(all_cov$ISO3Code)
+```
+
+## Observed years for each variable
+
+```{r}
+windows <- map(var_cfg, function(cfg) {
+  yrs <- all_cov |>
+    group_by(year) |>
+    summarise(share = mean(!is.na(.data[[cfg$col]]))) |>
+    filter(share >= min_obs_share) |>
+    pull(year)
+  c(start = min(yrs), end = max(yrs))
+})
+bind_rows(windows, .id = "variable")
+```
+
+Years before `start` have no data for any country and stay missing. Years after `end` are predicted with the trend model (Section 5).
+
+# Imputation function
+
+```{r}
+impute_covariate <- function(name, k) {
+  cfg <- var_cfg[[name]]
+  col <- cfg$col
+  start <- windows[[name]][["start"]]
+  end <- windows[[name]][["end"]]
+  message("==== Imputing ", name, " (observed ", start, "-", end, ") ====")
+
+  dat <- all_cov |>
+    filter(year >= start) |>
+    # GDP growth and log GDP per capita are predictors for the other variables
+    select(ISO3Code, location_name, year, all_of(col), gdp, any_of("log_gdp_pc"),
+           lpop, all_of(wpp_vars))
+
+  ### Step 1. Imputation to create country-level means by imputation ###
+  ## The first two columns are IDs and are not used as predictors.
+  ini <- mice(dat, maxit = 0)
+  pred <- ini$pred
+  meth <- ini$method
+  pred[, 1:2] <- 0
+  diag(pred) <- 0
+
+  imp <- par_mice(dat, pred, meth, seed = seed_base + 100 * k)
+
+  imp_long <- mice::complete(imp, action = "long") |> as_tibble()
+
+  # Country mean (on the imputation scale) over the observed years
+  country_mean <- imp_long |>
+    filter(year <= end) |>
+    mutate(v = cfg$to(.data[[col]])) |>
+    group_by(.imp, ISO3Code) |>
+    summarise(mn = mean(v), .groups = "drop")
+
+  # Imputed log population (needed for the trend model)
+  lpop_imp <- imp_long |> select(.imp, ISO3Code, year, lpop)
+
+  ### Step 2. Imputation on mean centered data (wide format) ###
+  wide <- dat |>
+    filter(year <= end) |>
+    mutate(v = cfg$to(.data[[col]])) |>
+    group_by(ISO3Code) |>
+    mutate(Z = v - mean(v, na.rm = TRUE)) |>
+    ungroup() |>
+    mutate(Z = if_else(is.nan(Z), NA_real_, Z)) |>
+    select(ISO3Code, year, Z) |>
+    pivot_wider(names_from = year, values_from = Z, names_prefix = "Z_")
+
+  # Years with very few observations cannot be imputed in the wide format
+  z_obs <- colSums(!is.na(wide[, -1]))
+  if (any(z_obs < 5)) {
+    warning(name, ": years with < 5 observations dropped from the wide imputation: ",
+            paste(names(z_obs)[z_obs < 5], collapse = ", "))
+    wide <- wide |> select(ISO3Code, all_of(names(z_obs)[z_obs >= 5]))
+  }
+
+  ini <- mice(wide, maxit = 0)
+  pred <- ini$pred
+  pred[1, ] <- 0
+  pred[, 1] <- 0
+  imp_z <- par_mice(wide, pred, ini$method, seed = seed_base + 100 * k + 50)
+
+  z_long <- mice::complete(imp_z, action = "long") |>
+    as_tibble() |>
+    pivot_longer(
+      starts_with("Z_"), names_prefix = "Z_",
+      names_to = "year", names_transform = list(year = as.numeric),
+      values_to = "Z"
+    )
+
+  ### Reconstruct the variable: country mean + centered value ###
+  recon <- z_long |>
+    left_join(country_mean, by = c(".imp", "ISO3Code")) |>
+    mutate(imp_c = mn + Z)
+  ## The additive reconstruction can fall outside the valid range, so values are clamped.
+  n_clamped <- sum(!is.na(recon$imp_c) & (recon$imp_c < cfg$lo | recon$imp_c > cfg$hi))
+  message(name, ": ", n_clamped, " imputed values were outside [", cfg$lo, ", ",
+          cfg$hi, "] and were clamped.")
+
+  recon <- recon |>
+    mutate(imp_raw = cfg$from(pmin(pmax(imp_c, cfg$lo), cfg$hi))) |>
+    select(.imp, ISO3Code, year, imp_raw) |>
+    # Observed values are kept as observed
+    left_join(dat |> select(ISO3Code, year, obs = all_of(col)),
+              by = c("ISO3Code", "year")) |>
+    mutate(imp_raw = coalesce(obs, imp_raw)) |>
+    select(-obs)
+
+  if (anyNA(recon$imp_raw)) {
+    stop(name, ": missing imputed values up to ", end, " (check the wide imputation).")
+  }
+
+  ### Step 3. Years after the last observed year ###
+  out <- expand_grid(.imp = 1:B, ISO3Code = All_countries$ISO3Code,
+                     year = start:last_year) |>
+    left_join(recon, by = c(".imp", "ISO3Code", "year"))
+
+  if (end < last_year) {
+    trend_start <- max(start, end - 9)
+    P_all_data <- out |>
+      left_join(lpop_imp, by = c(".imp", "ISO3Code", "year")) |>
+      mutate(country = ISO3Code,
+             Y = cfg$to_trend(imp_raw),   # NA after the last observed year
+             SE_var = 1)
+
+    registerDoParallel(cores = n_core)
+    fits <- foreach(j = 1:B, .packages = c("tidyverse", "nlme", "splines", "Matrix")) %dopar% {
+      source("Utils/Programs_Oct_2026.R")
+      all_data <- P_all_data |> filter(.imp == j & year >= trend_start)
+      data_w_out <- all_data |> select(country, year, Y, SE_var)
+      data_w_out$SE_pred <- data_w_out$SE_var
+
+      DF_R <- quantile(data_w_out$year, probs = c(0.5))
+      B.knots <- range(data_w_out$year[!is.na(data_w_out$Y)])
+      B.knots[1] <- B.knots[1] - 1
+      B.knots[2] <- B.knots[2] + 10
+      DF_P <- seq(min(data_w_out$year), end, 2)
+      # cmnpe needs a covariate called "Sex"; log population is used here
+      cov_data <- cbind(Sex = all_data$lpop, lpop2 = all_data$lpop^2)
+
+      ## The fit occasionally fails with "Inverse failed" for a particular imputation:
+      ## SDI-like series are so smooth that the estimated variances are tiny and the
+      ## variance matrices become numerically singular, and whether a fit succeeds
+      ## is sensitive to the scale of Y. If a fit fails, it is retried with Y
+      ## multiplied by other constants (the model is scale invariant, so the
+      ## predictions and SDs are divided by the constant afterwards) and then with
+      ## a wider knot spacing for the penalized spline.
+      Y_orig <- data_w_out$Y
+      Estimation <- NULL
+      for (attempt in seq_len(nrow(retry_grid))) {
+        y_scale <- retry_grid$y_scale[attempt]
+        data_w_out$Y <- Y_orig * y_scale
+        DF_P_try <- seq(min(data_w_out$year), end, retry_grid$knot_step[attempt])
+        fit <- try(capture.output(
+          Estimation <- cmnpe(data_w_out, DF_P_try, DF_R, B.knots, q.order = 2,
+                              cov_data = cov_data, Pcov_data = NULL,
+                              cov_mat = "VC", plots = FALSE, TRANS = FALSE,
+                              zero_covs = NULL, slope = TRUE)
+        ), silent = TRUE)
+        if (!inherits(fit, "try-error")) break
+      }
+      if (inherits(fit, "try-error")) stop(name, ": trend model failed for imputation ", j)
+      pd <- Estimation$plot_data
+      pd$pred <- pd$pred / y_scale
+      pd$sigma_Y_est <- pd$sigma_Y_est / y_scale
+      pd$attempts <- attempt - 1
+      pd
+    }
+    stopImplicitCluster()
+    n_retry <- sum(map_dbl(fits, \(f) f$attempts[1]) > 0)
+    message(name, ": the trend model needed a refit for ", n_retry, " of ", B, " imputations.")
+
+    ## Draw the values after the last observed year from the predictive distribution.
+    ## One standard normal draw is used per country and imputation (scaled by the
+    ## predictive SD of each year) so the draws are not independent noise from year
+    ## to year.
+    draws <- map_dfr(1:B, function(j) {
+      set.seed(seed_base + 1000 * k + j)
+      fits[[j]] |>
+        as_tibble() |>
+        mutate(.imp = j, ISO3Code = as.character(country)) |>
+        filter(year > end) |>
+        group_by(ISO3Code, year) |>
+        filter(row_number() == 1) |>
+        ungroup() |>
+        arrange(ISO3Code, year) |>
+        select(.imp, ISO3Code, year, pred, sigma_Y_est) |>
+        group_by(ISO3Code) |>
+        mutate(z_draw = rnorm(1)) |>
+        ungroup() |>
+        mutate(draw_raw = cfg$from_trend(pred + z_draw * sigma_Y_est)) |>
+        select(.imp, ISO3Code, year, draw_raw)
+    })
+
+    out <- out |>
+      left_join(draws, by = c(".imp", "ISO3Code", "year")) |>
+      mutate(imp_raw = if_else(year > end, draw_raw, imp_raw)) |>
+      select(-draw_raw)
+  }
+
+  if (anyNA(out$imp_raw)) {
+    stop(name, ": missing imputed values remain (check the trend model output).")
+  }
+
+  out |> rename(!!name := imp_raw)
+}
+```
+
+# Run the imputations
+
+Each variable takes a few minutes (two `mice` runs per variable, plus the trend model for `SDI`, `shock` and `war_terror`).
+
+```{r}
+imputed <- map2(names(var_cfg), seq_along(var_cfg), impute_covariate) |>
+  set_names(names(var_cfg))
+```
+
+## Checking the imputed values
+
+Ranges of the imputed variables, and trajectories (one line per imputation) for a sample of countries:
+
+```{r}
+imputed |>
+  imap_dfr(\(d, nm) summarise(d, variable = nm, min = min(.data[[nm]]),
+                              median = median(.data[[nm]]), max = max(.data[[nm]]))) |>
+  as.data.frame()
+
+set.seed(seed_base+1)
+samp_iso <- sample(unique(all_cov$ISO3Code), 25)
+for (nm in names(imputed)) {
+  p <- imputed[[nm]] |>
+    filter(ISO3Code %in% samp_iso) |>
+    left_join(All_countries, by = "ISO3Code") |>
+    ggplot(aes(x = year, y = .data[[nm]], group = .imp)) +
+    geom_line(alpha = 0.4) +
+    geom_vline(xintercept = windows[[nm]][["end"]], linetype = 2) +
+    facet_wrap(~location_name) +
+    labs(title = nm, caption = "Dashed line: last observed year")
+  print(p)
+}
+```
+
+# Final variables
+
+`fpi_prev5yr_avg` and `fpi_anom` are recomputed from the imputed `fpi_avg`, in the same way as in `01 - Covariate Cleaning.qmd` (the mean of the 5 previous years, which needs a complete 5 years of history).
+
+```{r}
+all_imp <- expand_grid(.imp = 1:B, ISO3Code = All_countries$ISO3Code,
+                       year = first_year:last_year) |>
+  left_join(All_countries, by = "ISO3Code") |>
+  left_join(all_cov |> select(ISO3Code, year, gdp), by = c("ISO3Code", "year")) |>
+  reduce(imputed, \(acc, d) left_join(acc, d, by = c(".imp", "ISO3Code", "year")),
+         .init = _) |>
+  arrange(.imp, ISO3Code, year) |>
+  group_by(.imp, ISO3Code) |>
+  mutate(
+    gdp_pc = exp(log_gdp_pc),
+    fpi_prev5yr_avg = slide_dbl(fpi_avg, mean, .before = 5, .after = -1,
+                                .complete = TRUE),
+    fpi_anom = fpi_avg - fpi_prev5yr_avg
+  ) |>
+  ungroup() |>
+  select(.imp, ISO3Code, year, location_name, SDI, gdp, log_gdp_pc, gdp_pc, dpt_imm,
+         fpi_avg, fpi_prev5yr_avg, fpi_anom, shock, war_terror)
+
+# Missing values by variable and year range (fpi is not available before 2001 by design)
+all_imp |>
+  filter(year > 1989) |>
+  mutate(period = if_else(year < 2001, "1990-2000", "2001-2026")) |>
+  group_by(period) |>
+  summarise(across(c(SDI, gdp, log_gdp_pc, gdp_pc, dpt_imm, fpi_avg,
+                     fpi_prev5yr_avg, fpi_anom, shock, war_terror),
+                   \(x) sum(is.na(x))))
+
+save(all_cov, imputed, windows, all_imp,
+     file = paste0("Data/IHME_covs/Imputation_", out_label, ".RData"))
+```
+
+## Merge with the region and income group data and save
+
+The data is created for all three sexes (the covariates do not vary by sex), as in the old program.
+
+```{r}
+cov_data <- readRDS("Data/IHME_covs/Tidy_World_Devel_Indic.rds")
+
+all_cov_long <- all_imp |>
+  mutate(Sex = "Both") |>
+  bind_rows(all_imp |> mutate(Sex = "Male")) |>
+  bind_rows(all_imp |> mutate(Sex = "Female")) |>
+  arrange(ISO3Code, year, Sex)
+
+## One name per country. Tidy_World_Devel_Indic.rds only goes to 2023, and its
+## names can differ from the imputed data's (e.g. "Turkey" vs "Türkiye", "Nauru"
+## vs "Naoero"). Taking the name row by row gave a different name for 2024-2026,
+## and since the model identifies countries by name, those years became a
+## separate country with no data. Use the Tidy name (it matches the JME survey
+## data) if the country has one, otherwise the imputed data's name.
+P_cov_data <- cov_data |>
+  full_join(all_cov_long, by = c("ISO.code" = "ISO3Code", "year", "Sex")) |>
+  group_by(ISO.code) |>
+  mutate(location_name = coalesce(
+    first(na.omit(location_name.x)),
+    first(na.omit(location_name.y)),
+    first(na.omit(as.character(Country)))
+  )) |>
+  ungroup() |>
+  select(-c("location_name.x", "location_name.y"))
+
+# Should be zero rows (one name per country)
+P_cov_data |> distinct(ISO.code, location_name) |> count(ISO.code) |> filter(n > 1)
+stopifnot(!anyDuplicated(distinct(P_cov_data, ISO.code, location_name)$ISO.code))
+
+cov_data <- P_cov_data |>
+  arrange(.imp, ISO.code, Sex, year) |>
+  filter(year > 1989) |>
+  group_by(.imp, ISO.code, Sex) |>
+  fill(Region:Country) |>
+  ungroup()
+
+# Should be zero rows
+cov_data |> count(.imp, ISO.code, Sex, year) |> filter(n > 1)
+```
+
+```{r}
+saveRDS(cov_data, paste0("Data/IHME_covs/Multiple_Imputed_", out_label, ".rds"))
+
+### Single imputation file: the average over the imputations of every numeric
+### variable (NA if all are missing). Non-numeric variables (e.g., Region, Country,
+### income group) are carried over.
+mean_na <- function(x) {
+  if (all(is.na(x))) NA_real_ else mean(x, na.rm = TRUE)
+}
+cov_data_mean <- cov_data |>
+  group_by(ISO.code, Sex, year) |>
+  summarise(
+    across(where(is.numeric) & !any_of(".imp"), mean_na),
+    across(!where(is.numeric), first),
+    .groups = "drop"
+  )
+
+saveRDS(cov_data_mean, paste0("Data/IHME_covs/Single_Impute_", out_label, ".rds"))
+```
+
+The downstream program `2 - Preparing Primary Data/3 - Merging Survey_Covariate_Data.R` reads `Multiple_Imputed_Oct2026.rds` and `Single_Impute_Oct2026.rds` (set by `imputed_label` there).
